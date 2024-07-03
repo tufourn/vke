@@ -167,7 +167,11 @@ void resizeWindow(VulkanContext &vk) {
     vkDeviceWaitIdle(vk.device);
 
     int width, height;
-    glfwGetWindowSize(vk.window, &width, &height);
+    glfwGetFramebufferSize(vk.window, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(vk.window, &width, &height);
+        glfwWaitEvents();
+    }
     vk.extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
 
     createSwapchain(vk);

@@ -72,7 +72,7 @@ int main() {
 
         presentInfo.pImageIndices = &imageIndex;
 
-        VkResult presentRet = vkQueuePresentKHR(vk.graphicsQueue, &presentInfo);
+        VkResult presentRet = vkQueuePresentKHR(vk.presentQueue, &presentInfo);
         if (presentRet == VK_ERROR_OUT_OF_DATE_KHR) {
             resizeWindow(vk);
         }
