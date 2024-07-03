@@ -3,7 +3,7 @@
 int main() {
 
     VulkanContext vk = {};
-    vk.extent = {1920, 1080};
+    vk.windowExtent = {1920, 1080};
 
     initVulkan(vk, {});
 
@@ -32,7 +32,7 @@ int main() {
 
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo))
 
-        transitionImage(cmd, vk.swapchainImages[imageIndex],
+        transitionImage(cmd, vk.drawImage.image,
                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -41,10 +41,22 @@ int main() {
 
         VkImageSubresourceRange clearRange = imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
-        vkCmdClearColorImage(cmd, vk.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+        vkCmdClearColorImage(cmd, vk.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+        transitionImage(cmd, vk.drawImage.image,
+                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
         transitionImage(cmd, vk.swapchainImages[imageIndex],
-                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+
+        copyImageToImage(cmd, vk.drawImage.image, vk.swapchainImages[imageIndex], vk.drawExtent, vk.windowExtent);
+
+        transitionImage(cmd, vk.swapchainImages[imageIndex],
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
@@ -55,7 +67,7 @@ int main() {
         VkSemaphoreSubmitInfo waitInfo = semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                                              vk.frames[currentFrame].imageAvailableSemaphore);
         VkSemaphoreSubmitInfo signalInfo = semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                                                             vk.frames[currentFrame].renderSemaphore);
+                                                               vk.frames[currentFrame].renderSemaphore);
 
         VkSubmitInfo2 submit = submitInfo(&cmdSubmitInfo, &signalInfo, &waitInfo);
 
