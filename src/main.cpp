@@ -1,4 +1,13 @@
 #include "VulkanUtils.h"
+#include "VulkanPipeline.h"
+
+void drawGeometry(VulkanContext &vk, VkCommandBuffer cmd);
+
+struct VulkanState {
+    VkPipeline trianglePipeline;
+    VkPipelineLayout trianglePipelineLayout;
+
+} vkState;
 
 int main() {
 
@@ -6,6 +15,30 @@ int main() {
     vk.windowExtent = {1920, 1080};
 
     initVulkan(vk, {});
+
+    VkShaderModule triangleVertShader, triangleFragShader;
+    VK_CHECK(createShaderModule(vk.device, "colored_triangle.vert.spv", &triangleVertShader));
+    VK_CHECK(createShaderModule(vk.device, "colored_triangle.frag.spv", &triangleFragShader));
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipelineLayoutCreateInfo();
+    VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutInfo, nullptr, &vkState.trianglePipelineLayout));
+
+    PipelineBuilder trianglePipelineBuilder;
+    trianglePipelineBuilder.setLayout(vkState.trianglePipelineLayout)
+    .setShaders(triangleVertShader, triangleFragShader)
+    .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+    .setPolygonMode(VK_POLYGON_MODE_FILL)
+    .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+    .setMultisamplingNone()
+    .disableBlending()
+    .disableDepthTest()
+    .setColorAttachmentFormat(vk.drawImage.imageFormat)
+    .setDepthAttachmentFormat(VK_FORMAT_UNDEFINED);
+
+    vkState.trianglePipeline = trianglePipelineBuilder.build(vk.device);
+
+    vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
+    vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
 
     uint32_t currentFrame = 0;
 
@@ -44,7 +77,14 @@ int main() {
         vkCmdClearColorImage(cmd, vk.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 
         transitionImage(cmd, vk.drawImage.image,
-                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+
+        drawGeometry(vk, cmd);
+
+        transitionImage(cmd, vk.drawImage.image,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
@@ -53,7 +93,7 @@ int main() {
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
-        copyImageToImage(cmd, vk.drawImage.image, vk.swapchainImages[imageIndex], vk.drawExtent, vk.windowExtent);
+        copyImageToImage(cmd, vk.drawImage.image, vk.swapchainImages[imageIndex], vk.windowExtent, vk.windowExtent);
 
         transitionImage(cmd, vk.swapchainImages[imageIndex],
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -92,5 +132,46 @@ int main() {
         currentFrame = (currentFrame + 1) % MAX_CONCURRENT_FRAMES;
     }
 
+    vkDeviceWaitIdle(vk.device);
+    vkDestroyPipelineLayout(vk.device, vkState.trianglePipelineLayout, nullptr);
+    vkDestroyPipeline(vk.device, vkState.trianglePipeline, nullptr);
     terminateVulkan(vk);
+}
+
+void drawGeometry(VulkanContext &vk, VkCommandBuffer cmd) {
+    VkRenderingAttachmentInfo colorAttachment = {};
+    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    colorAttachment.imageView = vk.drawImage.imageView;
+    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+    VkRenderingInfo renderInfo = renderingInfo(vk.windowExtent, &colorAttachment, nullptr);
+    vkCmdBeginRendering(cmd, &renderInfo);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState.trianglePipeline);
+
+    //set dynamic viewport and scissor
+    VkViewport viewport = {};
+    viewport.x = 0;
+    viewport.y = 0;
+    viewport.width = vk.windowExtent.width;
+    viewport.height = vk.windowExtent.height;
+    viewport.minDepth = 0.f;
+    viewport.maxDepth = 1.f;
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor = {};
+    scissor.offset.x = 0;
+    scissor.offset.y = 0;
+    scissor.extent.width = vk.windowExtent.width;
+    scissor.extent.height = vk.windowExtent.height;
+
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    //launch a draw command to draw 3 vertices
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    vkCmdEndRendering(cmd);
 }

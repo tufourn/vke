@@ -5,14 +5,15 @@
 #include <volk.h>
 #include <vulkan/vk_enum_string_helper.h>
 #include <VkBootstrap.h>
-
 #include <GLFW/glfw3.h>
-
 #include <vk_mem_alloc.h>
+
+#include "VulkanInit.h"
 
 #include <iostream>
 #include <vector>
 #include <array>
+#include <filesystem>
 
 constexpr int MAX_CONCURRENT_FRAMES = 2;
 
@@ -107,25 +108,13 @@ void resizeWindow(VulkanContext &vk);
 
 void initCommands(VulkanContext &vk);
 
-VkFenceCreateInfo fenceCreateInfo(VkFenceCreateFlags flags = 0);
-
-VkSemaphoreCreateInfo semaphoreCreateInfo(VkSemaphoreCreateFlags flags = 0);
-
 void initSyncStructures(VulkanContext &vk);
 
 void initVmaAllocator(VulkanContext &vk);
 
-VkCommandBufferBeginInfo commandBufferBeginInfo(VkCommandBufferUsageFlags flags);
-
-VkImageSubresourceRange imageSubresourceRange(VkImageAspectFlags aspectMask);
-
 void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
                      VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask,
                      VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask);
-
-VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stageMask, VkSemaphore semaphore);
-
-VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd);
 
 VkSubmitInfo2 submitInfo(VkCommandBufferSubmitInfo *cmd,
                          VkSemaphoreSubmitInfo *signalSemaphoreInfo,
@@ -136,8 +125,6 @@ VulkanBuffer createBuffer(VmaAllocator allocator,
 
 void destroyBuffer(VmaAllocator allocator, const VulkanBuffer &buffer);
 
-VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usage, VkExtent3D extent);
-
-VkImageViewCreateInfo imageViewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspect);
-
 void copyImageToImage(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize, VkExtent2D dstSize);
+
+VkResult createShaderModule(VkDevice device, std::filesystem::path shaderFile, VkShaderModule* shaderModule);
