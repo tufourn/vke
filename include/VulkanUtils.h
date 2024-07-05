@@ -1,21 +1,9 @@
 #pragma once
 
-#define VK_NO_PROTOTYPES
-
 #include <volk.h>
 #include <vulkan/vk_enum_string_helper.h>
-#include <VkBootstrap.h>
-#include <GLFW/glfw3.h>
-#include <vk_mem_alloc.h>
-
-#include "VulkanInit.h"
 
 #include <iostream>
-#include <vector>
-#include <array>
-#include <filesystem>
-
-constexpr int MAX_CONCURRENT_FRAMES = 2;
 
 #define VK_CHECK(func) \
 { \
@@ -30,101 +18,12 @@ constexpr int MAX_CONCURRENT_FRAMES = 2;
     } \
 }
 
-struct VulkanFeatures {
-    bool dynamicRendering = true;
-    bool synchronization2 = true;
-    bool bufferDeviceAddress = true;
-    bool descriptorIndexing = true;
-};
+namespace VkUtil {
 
-struct VulkanBuffer {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocationInfo info;
-};
+    void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
+                         VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask,
+                         VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask);
 
-struct VulkanImage {
-    VkImage image;
-    VkImageView imageView;
-    VmaAllocation allocation;
-    VkExtent3D imageExtent;
-    VkFormat imageFormat;
-};
+    void copyImageToImage(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize, VkExtent2D dstSize);
 
-struct FrameData {
-    VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-    VkSemaphore renderSemaphore = VK_NULL_HANDLE;
-    VkFence renderFence = VK_NULL_HANDLE;
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-};
-
-struct VulkanContext {
-    vkb::Instance instance = {};
-    bool useValidationLayer = true;
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-
-    GLFWwindow *window = nullptr;
-    VkExtent2D windowExtent = {800, 600};
-
-    vkb::Device device = {};
-    vkb::PhysicalDevice physicalDevice = {};
-
-    VmaAllocator allocator;
-
-    uint32_t graphicsFamily;
-    VkQueue graphicsQueue = VK_NULL_HANDLE;
-    uint32_t presentFamily;
-    VkQueue presentQueue = VK_NULL_HANDLE;
-
-    vkb::Swapchain swapchain = {};
-    std::vector<VkImage> swapchainImages = {};
-    std::vector<VkImageView> swapchainImageViews = {};
-    VkFormat swapchainImageFormat;
-
-    VulkanImage drawImage = {};
-    VkExtent2D drawExtent;
-
-    std::array<FrameData, MAX_CONCURRENT_FRAMES> frames;
-};
-
-void initVulkan(VulkanContext &vk, const VulkanFeatures &ctxFeatures);
-
-void initVulkanInstance(VulkanContext &vk);
-
-void initWindow(VulkanContext &vk);
-
-void initVulkanDevice(VulkanContext &vk, const VulkanFeatures &ctxFeatures);
-
-void terminateVulkan(VulkanContext &vk);
-
-void initSwapchain(VulkanContext &vk);
-
-void createSwapchain(VulkanContext &vk);
-
-void destroySwapchain(VulkanContext &vk);
-
-void resizeWindow(VulkanContext &vk);
-
-void initCommands(VulkanContext &vk);
-
-void initSyncStructures(VulkanContext &vk);
-
-void initVmaAllocator(VulkanContext &vk);
-
-void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
-                     VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask,
-                     VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask);
-
-VkSubmitInfo2 submitInfo(VkCommandBufferSubmitInfo *cmd,
-                         VkSemaphoreSubmitInfo *signalSemaphoreInfo,
-                         VkSemaphoreSubmitInfo *waitSemaphoreInfo);
-
-VulkanBuffer createBuffer(VmaAllocator allocator,
-                          size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
-
-void destroyBuffer(VmaAllocator allocator, const VulkanBuffer &buffer);
-
-void copyImageToImage(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize, VkExtent2D dstSize);
-
-VkResult createShaderModule(VkDevice device, std::filesystem::path shaderFile, VkShaderModule* shaderModule);
+}

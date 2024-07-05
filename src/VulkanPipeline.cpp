@@ -78,13 +78,13 @@ PipelineBuilder &PipelineBuilder::setShaders(VkShaderModule vertexShader, VkShad
     m_shaderStages.clear();
 
     if (vertexShader) {
-        m_shaderStages.push_back(pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShader));
+        m_shaderStages.push_back(VkInit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShader));
     } else {
         std::cerr << "Missing vertex shader module\n";
     }
 
     if (fragmentShader) {
-        m_shaderStages.push_back(pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
+        m_shaderStages.push_back(VkInit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
     } else {
         std::cerr << "Missing fragment shader module\n";
     }

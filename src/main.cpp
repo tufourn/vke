@@ -1,4 +1,6 @@
+#include "VulkanContext.h"
 #include "VulkanUtils.h"
+#include "VulkanInit.h"
 #include "VulkanPipeline.h"
 
 void drawGeometry(VulkanContext &vk, VkCommandBuffer cmd);
@@ -14,26 +16,27 @@ int main() {
     VulkanContext vk = {};
     vk.windowExtent = {1920, 1080};
 
-    initVulkan(vk, {});
+    vk.init();
 
     VkShaderModule triangleVertShader, triangleFragShader;
-    VK_CHECK(createShaderModule(vk.device, "colored_triangle.vert.spv", &triangleVertShader));
-    VK_CHECK(createShaderModule(vk.device, "colored_triangle.frag.spv", &triangleFragShader));
+    VK_CHECK(vk.createShaderModule("colored_triangle.vert.spv", &triangleVertShader))
+    VK_CHECK(vk.createShaderModule("colored_triangle.frag.spv", &triangleFragShader))
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipelineLayoutCreateInfo();
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkInit::pipelineLayoutCreateInfo();
     VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutInfo, nullptr, &vkState.trianglePipelineLayout));
 
     PipelineBuilder trianglePipelineBuilder;
-    trianglePipelineBuilder.setLayout(vkState.trianglePipelineLayout)
-    .setShaders(triangleVertShader, triangleFragShader)
-    .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-    .setPolygonMode(VK_POLYGON_MODE_FILL)
-    .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
-    .setMultisamplingNone()
-    .disableBlending()
-    .disableDepthTest()
-    .setColorAttachmentFormat(vk.drawImage.imageFormat)
-    .setDepthAttachmentFormat(VK_FORMAT_UNDEFINED);
+    trianglePipelineBuilder
+            .setLayout(vkState.trianglePipelineLayout)
+            .setShaders(triangleVertShader, triangleFragShader)
+            .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+            .setPolygonMode(VK_POLYGON_MODE_FILL)
+            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+            .setMultisamplingNone()
+            .disableBlending()
+            .disableDepthTest()
+            .setColorAttachmentFormat(vk.drawImage.imageFormat)
+            .setDepthAttachmentFormat(VK_FORMAT_UNDEFINED);
 
     vkState.trianglePipeline = trianglePipelineBuilder.build(vk.device);
 
@@ -53,7 +56,7 @@ int main() {
                                                       vk.frames[currentFrame].imageAvailableSemaphore, VK_NULL_HANDLE,
                                                       &imageIndex);
         if (swapchainRet == VK_ERROR_OUT_OF_DATE_KHR) {
-            resizeWindow(vk);
+            vk.resizeWindow();
             continue;
         }
 
@@ -61,55 +64,57 @@ int main() {
 
         VK_CHECK(vkResetCommandBuffer(cmd, 0))
 
-        VkCommandBufferBeginInfo cmdBeginInfo = commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+        VkCommandBufferBeginInfo cmdBeginInfo = VkInit::commandBufferBeginInfo(
+                VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo))
 
-        transitionImage(cmd, vk.drawImage.image,
-                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::transitionImage(cmd, vk.drawImage.image,
+                                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
         VkClearColorValue clearValue = {{0.0f, 0.0f, 1.0f, 1.0f}};
 
-        VkImageSubresourceRange clearRange = imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+        VkImageSubresourceRange clearRange = VkInit::imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
         vkCmdClearColorImage(cmd, vk.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 
-        transitionImage(cmd, vk.drawImage.image,
-                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::transitionImage(cmd, vk.drawImage.image,
+                                VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
         drawGeometry(vk, cmd);
 
-        transitionImage(cmd, vk.drawImage.image,
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+        VkUtil::transitionImage(cmd, vk.drawImage.image,
+                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
-        transitionImage(cmd, vk.swapchainImages[imageIndex],
-                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::transitionImage(cmd, vk.swapchainImages[imageIndex],
+                                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
-        copyImageToImage(cmd, vk.drawImage.image, vk.swapchainImages[imageIndex], vk.windowExtent, vk.windowExtent);
+        VkUtil::copyImageToImage(cmd, vk.drawImage.image, vk.swapchainImages[imageIndex], vk.windowExtent,
+                                 vk.windowExtent);
 
-        transitionImage(cmd, vk.swapchainImages[imageIndex],
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+        VkUtil::transitionImage(cmd, vk.swapchainImages[imageIndex],
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                                VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
         VK_CHECK(vkEndCommandBuffer(cmd))
 
-        VkCommandBufferSubmitInfo cmdSubmitInfo = commandBufferSubmitInfo(cmd);
+        VkCommandBufferSubmitInfo cmdSubmitInfo = VkInit::commandBufferSubmitInfo(cmd);
 
-        VkSemaphoreSubmitInfo waitInfo = semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                             vk.frames[currentFrame].imageAvailableSemaphore);
-        VkSemaphoreSubmitInfo signalInfo = semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                                                               vk.frames[currentFrame].renderSemaphore);
+        VkSemaphoreSubmitInfo waitInfo = VkInit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                                                     vk.frames[currentFrame].imageAvailableSemaphore);
+        VkSemaphoreSubmitInfo signalInfo = VkInit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                                                                       vk.frames[currentFrame].renderSemaphore);
 
-        VkSubmitInfo2 submit = submitInfo(&cmdSubmitInfo, &signalInfo, &waitInfo);
+        VkSubmitInfo2 submit = VkInit::submitInfo(&cmdSubmitInfo, &signalInfo, &waitInfo);
 
         VK_CHECK(vkQueueSubmit2(vk.graphicsQueue, 1, &submit, vk.frames[currentFrame].renderFence))
 
@@ -126,7 +131,7 @@ int main() {
 
         VkResult presentRet = vkQueuePresentKHR(vk.presentQueue, &presentInfo);
         if (presentRet == VK_ERROR_OUT_OF_DATE_KHR) {
-            resizeWindow(vk);
+            vk.resizeWindow();
         }
 
         currentFrame = (currentFrame + 1) % MAX_CONCURRENT_FRAMES;
@@ -135,7 +140,7 @@ int main() {
     vkDeviceWaitIdle(vk.device);
     vkDestroyPipelineLayout(vk.device, vkState.trianglePipelineLayout, nullptr);
     vkDestroyPipeline(vk.device, vkState.trianglePipeline, nullptr);
-    terminateVulkan(vk);
+    vk.terminate();
 }
 
 void drawGeometry(VulkanContext &vk, VkCommandBuffer cmd) {
@@ -146,7 +151,7 @@ void drawGeometry(VulkanContext &vk, VkCommandBuffer cmd) {
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-    VkRenderingInfo renderInfo = renderingInfo(vk.windowExtent, &colorAttachment, nullptr);
+    VkRenderingInfo renderInfo = VkInit::renderingInfo(vk.windowExtent, &colorAttachment, nullptr);
     vkCmdBeginRendering(cmd, &renderInfo);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState.trianglePipeline);

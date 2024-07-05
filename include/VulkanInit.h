@@ -2,27 +2,35 @@
 
 #include <volk.h>
 
-VkFenceCreateInfo fenceCreateInfo(VkFenceCreateFlags flags = 0);
+namespace VkInit {
 
-VkSemaphoreCreateInfo semaphoreCreateInfo(VkSemaphoreCreateFlags flags = 0);
+    VkFenceCreateInfo fenceCreateInfo(VkFenceCreateFlags flags = 0);
 
-VkCommandBufferBeginInfo commandBufferBeginInfo(VkCommandBufferUsageFlags flags);
+    VkSemaphoreCreateInfo semaphoreCreateInfo(VkSemaphoreCreateFlags flags = 0);
 
-VkImageSubresourceRange imageSubresourceRange(VkImageAspectFlags aspectMask);
+    VkCommandBufferBeginInfo commandBufferBeginInfo(VkCommandBufferUsageFlags flags);
 
-VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stageMask, VkSemaphore semaphore);
+    VkImageSubresourceRange imageSubresourceRange(VkImageAspectFlags aspectMask);
 
-VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd);
+    VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stageMask, VkSemaphore semaphore);
 
-VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usage, VkExtent3D extent);
+    VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd);
 
-VkImageViewCreateInfo imageViewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspect);
+    VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usage, VkExtent3D extent);
 
-VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage,
-                                                              VkShaderModule shaderModule,
-                                                              const char *entry = "main");
+    VkImageViewCreateInfo imageViewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspect);
 
-VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo();
+    VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage,
+                                                                  VkShaderModule shaderModule,
+                                                                  const char *entry = "main");
 
-VkRenderingInfo renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo *colorAttachment,
-                              VkRenderingAttachmentInfo *depthAttachment);
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo();
+
+    VkRenderingInfo renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo *colorAttachment,
+                                  VkRenderingAttachmentInfo *depthAttachment);
+
+    VkSubmitInfo2 submitInfo(VkCommandBufferSubmitInfo *cmd,
+                             VkSemaphoreSubmitInfo *signalSemaphoreInfo,
+                             VkSemaphoreSubmitInfo *waitSemaphoreInfo);
+
+}
