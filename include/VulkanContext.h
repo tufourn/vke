@@ -83,6 +83,10 @@ struct VulkanContext {
 
     void destroyBuffer(const VulkanBuffer &buffer) const;
 
+    VulkanImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
+
+    void destroyImage(const VulkanImage &img);
+
 private:
     void initVulkanInstance();
 
@@ -94,6 +98,8 @@ private:
 
     void createSwapchain();
 
+    void createDrawImage();
+
     void destroySwapchain();
 
     void initCommands();
@@ -101,6 +107,7 @@ private:
     void initSyncStructures();
 
     void initVmaAllocator();
+
 };
 
 

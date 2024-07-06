@@ -81,8 +81,7 @@ void VulkanContext::terminate() {
         vkDestroySemaphore(device, frames[i].imageAvailableSemaphore, nullptr);
     }
 
-    vkDestroyImageView(device, drawImage.imageView, nullptr);
-    vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
+    destroyImage(drawImage);
 
     destroySwapchain();
 
@@ -98,35 +97,7 @@ void VulkanContext::terminate() {
 
 void VulkanContext::initSwapchain() {
     createSwapchain();
-
-    VkExtent3D drawImageExtent = {
-            windowExtent.width,
-            windowExtent.height,
-            1,
-    };
-
-    drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-    drawImage.imageExtent = drawImageExtent;
-
-    VkImageUsageFlags drawImageUsages = {};
-    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
-    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-    VkImageCreateInfo drawImageInfo = VkInit::imageCreateInfo(drawImage.imageFormat, drawImageUsages,
-                                                      drawImage.imageExtent);
-
-    VmaAllocationCreateInfo drawImageAllocInfo = {};
-    drawImageAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    drawImageAllocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vmaCreateImage(allocator, &drawImageInfo, &drawImageAllocInfo,
-                   &drawImage.image, &drawImage.allocation, nullptr);
-
-    VkImageViewCreateInfo drawImageViewInfo = VkInit::imageViewCreateInfo(drawImage.imageFormat, drawImage.image,
-                                                                  VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(device, &drawImageViewInfo, nullptr, &drawImage.imageView))
+    createDrawImage();
 }
 
 void VulkanContext::createSwapchain() {
@@ -208,8 +179,10 @@ void VulkanContext::resizeWindow() {
         glfwWaitEvents();
     }
     windowExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
-
     createSwapchain();
+
+    destroyImage(drawImage);
+    createDrawImage();
 }
 
 void VulkanContext::destroySwapchain() {
@@ -250,5 +223,55 @@ VkResult VulkanContext::createShaderModule(std::filesystem::path shaderFile, VkS
     info.pCode = reinterpret_cast<const uint32_t *>(code.data());
 
     return vkCreateShaderModule(device, &info, nullptr, shaderModule);
+}
+
+VulkanImage VulkanContext::createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
+    VulkanImage newImage = {};
+    newImage.imageFormat = format;
+    newImage.imageExtent = extent;
+
+    VkImageCreateInfo imgInfo = VkInit::imageCreateInfo(format, usage, extent);
+    if (mipmapped) {
+        imgInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height))));
+    }
+
+    VmaAllocationCreateInfo allocInfo = {};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_CHECK(vmaCreateImage(allocator, &imgInfo, &allocInfo, &newImage.image, &newImage.allocation, nullptr))
+
+    VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (format == VK_FORMAT_D32_SFLOAT) {
+        aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+
+    VkImageViewCreateInfo imgViewInfo = VkInit::imageViewCreateInfo(format, newImage.image, aspectFlag);
+    imgViewInfo.subresourceRange.levelCount = imgInfo.mipLevels;
+
+    VK_CHECK(vkCreateImageView(device, &imgViewInfo, nullptr, &newImage.imageView))
+
+    return newImage;
+}
+
+void VulkanContext::destroyImage(const VulkanImage &img) {
+    vkDestroyImageView(device, img.imageView, nullptr);
+    vmaDestroyImage(allocator, img.image, img.allocation);
+}
+
+void VulkanContext::createDrawImage() {
+    VkExtent3D drawImageExtent = {
+            windowExtent.width,
+            windowExtent.height,
+            1,
+    };
+
+    VkImageUsageFlags drawImageUsages = 0;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    drawImage = createImage(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT, drawImageUsages, false);
 }
 
