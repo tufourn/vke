@@ -4,15 +4,16 @@
 #include <vulkan/vk_enum_string_helper.h>
 
 #include <iostream>
+#include <cassert>
 
 #define VK_CHECK(func) \
 { \
-    const VkResult result = func; \
-    if (result != VK_SUCCESS) { \
+    const VkResult vkCheckRet = func; \
+    if (vkCheckRet != VK_SUCCESS) { \
         std::cerr << "Error calling function " << #func \
         << " at " << __FILE__ << ":" \
         << __LINE__ << ". Result is " \
-        << string_VkResult(result) \
+        << string_VkResult(vkCheckRet) \
         << std::endl; \
         assert(false); \
     } \
