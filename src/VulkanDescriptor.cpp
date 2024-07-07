@@ -4,7 +4,7 @@
 void DescriptorAllocator::init(VkDevice device, uint32_t initialSets, std::span<PoolSizeRatio> poolRatios) {
     m_ratios.clear();
 
-    for (auto ratio: poolRatios) {
+    for (auto& ratio: poolRatios) {
         m_ratios.push_back(ratio);
     }
 
@@ -14,11 +14,11 @@ void DescriptorAllocator::init(VkDevice device, uint32_t initialSets, std::span<
 }
 
 void DescriptorAllocator::clearPools(VkDevice device) {
-    for (auto pool: m_readyPools) {
+    for (auto& pool: m_readyPools) {
         vkResetDescriptorPool(device, pool, 0);
     }
 
-    for (auto pool: m_fullPools) {
+    for (auto& pool: m_fullPools) {
         vkResetDescriptorPool(device, pool, 0);
         m_readyPools.push_back(pool);
     }
@@ -27,11 +27,11 @@ void DescriptorAllocator::clearPools(VkDevice device) {
 }
 
 void DescriptorAllocator::destroyPools(VkDevice device) {
-    for (auto pool: m_readyPools) {
+    for (auto& pool: m_readyPools) {
         vkDestroyDescriptorPool(device, pool, nullptr);
     }
 
-    for (auto pool: m_fullPools) {
+    for (auto& pool: m_fullPools) {
         vkDestroyDescriptorPool(device, pool, nullptr);
     }
 
@@ -174,7 +174,7 @@ void DescriptorLayoutBuilder::clear() {
 
 VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderStageFlags shaderStages, void *pNext,
                                                      VkDescriptorSetLayoutCreateFlags flags) {
-    for (auto binding : m_bindings) {
+    for (auto& binding : m_bindings) {
         binding.stageFlags |= shaderStages;
     }
 
@@ -183,6 +183,7 @@ VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderSt
     info.pNext = pNext;
     info.bindingCount = static_cast<uint32_t>(m_bindings.size());
     info.pBindings = m_bindings.data();
+    info.flags = flags;
 
     VkDescriptorSetLayout layout;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &info, nullptr, &layout))

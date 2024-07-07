@@ -199,7 +199,8 @@ void VulkanContext::destroySwapchain() {
     }
 }
 
-VulkanBuffer VulkanContext::createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const {
+VulkanBuffer VulkanContext::createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
+                                         VmaMemoryUsage memoryUsage) const {
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = allocSize;
@@ -207,7 +208,7 @@ VulkanBuffer VulkanContext::createBuffer(size_t allocSize, VkBufferUsageFlags us
 
     VmaAllocationCreateInfo vmaAllocInfo = {};
     vmaAllocInfo.usage = memoryUsage;
-    vmaAllocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    vmaAllocInfo.flags = flags;
     VulkanBuffer newBuffer = {};
 
     VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &vmaAllocInfo,
@@ -245,8 +246,9 @@ VulkanImage VulkanContext::createImage(VkExtent3D extent,
     }
 
     VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+    allocInfo.priority = 1.0f;
 
     VK_CHECK(vmaCreateImage(allocator, &imgInfo, &allocInfo, &newImage.image, &newImage.allocation, nullptr))
 
@@ -284,7 +286,7 @@ void VulkanContext::createDrawImage() {
     drawImage = createImage(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT, drawImageUsages, false);
 }
 
-void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&func) {
+void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&func) const {
     VK_CHECK(vkResetFences(device, 1, &m_immediateFence))
     VK_CHECK(vkResetCommandBuffer(m_immediateCommandBuffer, 0))
 
@@ -302,4 +304,51 @@ void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&f
     VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submitInfo, m_immediateFence))
 
     VK_CHECK(vkWaitForFences(device, 1, &m_immediateFence, true, 1e9))
+}
+
+VulkanImage VulkanContext::createImage(void *data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
+                                       bool mipmapped) const {
+    size_t dataSize = extent.depth * extent.width * extent.height * 4; // 1 for each rgba channel
+
+    VulkanBuffer uploadBuffer = createBuffer(dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                             VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    memcpy(uploadBuffer.info.pMappedData, data, dataSize);
+
+    VulkanImage newImage = createImage(extent, format,
+                                       usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                       mipmapped);
+
+    immediateSubmit([&](VkCommandBuffer cmd) {
+        VkUtil::transitionImage(cmd, newImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                0,
+                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
+
+        VkBufferImageCopy copyRegion = {};
+        copyRegion.bufferOffset = 0;
+        copyRegion.bufferRowLength = 0;
+        copyRegion.bufferImageHeight = 0;
+
+        copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copyRegion.imageSubresource.mipLevel = 0;
+        copyRegion.imageSubresource.baseArrayLayer = 0;
+        copyRegion.imageSubresource.layerCount = 1;
+        copyRegion.imageExtent = extent;
+
+        vkCmdCopyBufferToImage(cmd, uploadBuffer.buffer, newImage.image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+        VkUtil::transitionImage(cmd, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
+    });
+
+    destroyBuffer(uploadBuffer);
+
+    return newImage;
 }

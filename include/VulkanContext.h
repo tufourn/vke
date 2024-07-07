@@ -11,6 +11,7 @@
 #include <array>
 #include <filesystem>
 #include <functional>
+#include "VulkanDescriptor.h"
 
 constexpr int MAX_CONCURRENT_FRAMES = 2;
 
@@ -41,6 +42,7 @@ struct FrameData {
     VkFence renderFence = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    DescriptorAllocator frameDescriptors = {};
 };
 
 struct VulkanContext {
@@ -80,15 +82,19 @@ struct VulkanContext {
 
     VkResult createShaderModule(std::filesystem::path shaderFile, VkShaderModule *shaderModule) const;
 
-    VulkanBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const;
+    VulkanBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
+                              VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_AUTO) const;
 
     void destroyBuffer(const VulkanBuffer &buffer) const;
 
     VulkanImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
 
+    VulkanImage createImage(void *data,
+                            VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
+
     void destroyImage(const VulkanImage &img) const;
 
-    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
+    void immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&function) const;
 
 private:
     VkFence m_immediateFence;
