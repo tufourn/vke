@@ -10,6 +10,7 @@
 #include <vector>
 #include <array>
 #include <filesystem>
+#include <functional>
 
 constexpr int MAX_CONCURRENT_FRAMES = 2;
 
@@ -83,11 +84,17 @@ struct VulkanContext {
 
     void destroyBuffer(const VulkanBuffer &buffer) const;
 
-    VulkanImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
+    VulkanImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
 
-    void destroyImage(const VulkanImage &img);
+    void destroyImage(const VulkanImage &img) const;
+
+    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
 private:
+    VkFence m_immediateFence;
+    VkCommandBuffer m_immediateCommandBuffer;
+    VkCommandPool m_immediateCommandPool;
+
     void initVulkanInstance();
 
     void initWindow();

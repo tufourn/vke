@@ -74,6 +74,10 @@ void VulkanContext::initVulkanDevice() {
 
 void VulkanContext::terminate() {
     vkDeviceWaitIdle(device);
+
+    vkDestroyFence(device, m_immediateFence, nullptr);
+    vkDestroyCommandPool(device, m_immediateCommandPool, nullptr);
+
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         vkDestroyCommandPool(device, frames[i].commandPool, nullptr);
         vkDestroyFence(device, frames[i].renderFence, nullptr);
@@ -133,14 +137,14 @@ void VulkanContext::initCommands() {
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &frames[i].commandPool))
 
-        VkCommandBufferAllocateInfo commandBufferInfo = {};
-        commandBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        commandBufferInfo.commandPool = frames[i].commandPool;
-        commandBufferInfo.commandBufferCount = 1;
-        commandBufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        VkCommandBufferAllocateInfo cmdBufferAllocInfo = VkInit::commandBufferAllocateInfo(frames[i].commandPool, 1);
 
-        VK_CHECK(vkAllocateCommandBuffers(device, &commandBufferInfo, &frames[i].commandBuffer))
+        VK_CHECK(vkAllocateCommandBuffers(device, &cmdBufferAllocInfo, &frames[i].commandBuffer))
     }
+
+    VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &m_immediateCommandPool))
+    VkCommandBufferAllocateInfo immCmdBufferAllocInfo = VkInit::commandBufferAllocateInfo(m_immediateCommandPool, 1);
+    VK_CHECK(vkAllocateCommandBuffers(device, &immCmdBufferAllocInfo, &m_immediateCommandBuffer))
 }
 
 void VulkanContext::initSyncStructures() {
@@ -152,6 +156,8 @@ void VulkanContext::initSyncStructures() {
         VK_CHECK(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &frames[i].imageAvailableSemaphore))
         VK_CHECK(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &frames[i].renderSemaphore))
     }
+
+    VK_CHECK(vkCreateFence(device, &fenceInfo, nullptr, &m_immediateFence))
 }
 
 void VulkanContext::initVmaAllocator() {
@@ -225,7 +231,10 @@ VkResult VulkanContext::createShaderModule(std::filesystem::path shaderFile, VkS
     return vkCreateShaderModule(device, &info, nullptr, shaderModule);
 }
 
-VulkanImage VulkanContext::createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
+VulkanImage VulkanContext::createImage(VkExtent3D extent,
+                                       VkFormat format,
+                                       VkImageUsageFlags usage,
+                                       bool mipmapped) const {
     VulkanImage newImage = {};
     newImage.imageFormat = format;
     newImage.imageExtent = extent;
@@ -254,7 +263,7 @@ VulkanImage VulkanContext::createImage(VkExtent3D extent, VkFormat format, VkIma
     return newImage;
 }
 
-void VulkanContext::destroyImage(const VulkanImage &img) {
+void VulkanContext::destroyImage(const VulkanImage &img) const {
     vkDestroyImageView(device, img.imageView, nullptr);
     vmaDestroyImage(allocator, img.image, img.allocation);
 }
@@ -275,3 +284,22 @@ void VulkanContext::createDrawImage() {
     drawImage = createImage(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT, drawImageUsages, false);
 }
 
+void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&func) {
+    VK_CHECK(vkResetFences(device, 1, &m_immediateFence))
+    VK_CHECK(vkResetCommandBuffer(m_immediateCommandBuffer, 0))
+
+    VkCommandBuffer cmd = m_immediateCommandBuffer;
+
+    VkCommandBufferBeginInfo cmdBeginInfo = VkInit::commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo))
+
+    func(cmd);
+
+    VK_CHECK(vkEndCommandBuffer(cmd))
+
+    VkCommandBufferSubmitInfo cmdSubmitInfo = VkInit::commandBufferSubmitInfo(cmd);
+    VkSubmitInfo2 submitInfo = VkInit::submitInfo(&cmdSubmitInfo, nullptr, nullptr);
+    VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submitInfo, m_immediateFence))
+
+    VK_CHECK(vkWaitForFences(device, 1, &m_immediateFence, true, 1e9))
+}

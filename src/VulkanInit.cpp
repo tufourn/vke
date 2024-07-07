@@ -151,4 +151,14 @@ namespace VkInit {
         return info;
     }
 
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo(VkCommandPool pool, uint32_t count) {
+        VkCommandBufferAllocateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        info.commandPool = pool;
+        info.commandBufferCount = count;
+        info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+        return info;
+    }
+
 }

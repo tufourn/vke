@@ -33,4 +33,6 @@ namespace VkInit {
                              VkSemaphoreSubmitInfo *signalSemaphoreInfo,
                              VkSemaphoreSubmitInfo *waitSemaphoreInfo);
 
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo(VkCommandPool pool, uint32_t count);
+
 }
