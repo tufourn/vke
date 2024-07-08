@@ -71,6 +71,7 @@ struct VulkanContext {
     VkFormat swapchainImageFormat = VK_FORMAT_UNDEFINED;
 
     VulkanImage drawImage = {};
+    VulkanImage depthImage = {};
 
     std::array<FrameData, MAX_CONCURRENT_FRAMES> frames;
 
@@ -82,15 +83,16 @@ struct VulkanContext {
 
     VkResult createShaderModule(std::filesystem::path shaderFile, VkShaderModule *shaderModule) const;
 
-    VulkanBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
-                              VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_AUTO) const;
+    [[nodiscard]] VulkanBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
+                                            VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_AUTO) const;
 
     void destroyBuffer(const VulkanBuffer &buffer) const;
 
-    VulkanImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
+    [[nodiscard]] VulkanImage createImage(VkExtent3D extent,
+                                          VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
 
-    VulkanImage createImage(void *data,
-                            VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
+    [[nodiscard]] VulkanImage createImage(void *data, VkExtent3D extent,
+                                          VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
 
     void destroyImage(const VulkanImage &img) const;
 
@@ -113,6 +115,8 @@ private:
 
     void createDrawImage();
 
+    void createDepthImage();
+
     void destroySwapchain();
 
     void initCommands();
@@ -120,7 +124,6 @@ private:
     void initSyncStructures();
 
     void initVmaAllocator();
-
 };
 
 

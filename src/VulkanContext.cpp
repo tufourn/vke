@@ -86,6 +86,7 @@ void VulkanContext::terminate() {
     }
 
     destroyImage(drawImage);
+    destroyImage(depthImage);
 
     destroySwapchain();
 
@@ -102,6 +103,7 @@ void VulkanContext::terminate() {
 void VulkanContext::initSwapchain() {
     createSwapchain();
     createDrawImage();
+    createDepthImage();
 }
 
 void VulkanContext::createSwapchain() {
@@ -188,7 +190,9 @@ void VulkanContext::resizeWindow() {
     createSwapchain();
 
     destroyImage(drawImage);
+    destroyImage(depthImage);
     createDrawImage();
+    createDepthImage();
 }
 
 void VulkanContext::destroySwapchain() {
@@ -308,7 +312,7 @@ void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&f
 
 VulkanImage VulkanContext::createImage(void *data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
                                        bool mipmapped) const {
-    size_t dataSize = extent.depth * extent.width * extent.height * 4; // 1 for each rgba channel
+    size_t dataSize = extent.depth * extent.width * extent.height * 4; // 1 byte for each rgba channel
 
     VulkanBuffer uploadBuffer = createBuffer(dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
@@ -351,4 +355,15 @@ VulkanImage VulkanContext::createImage(void *data, VkExtent3D extent, VkFormat f
     destroyBuffer(uploadBuffer);
 
     return newImage;
+}
+
+void VulkanContext::createDepthImage() {
+    VkExtent3D depthImageExtent = {
+            windowExtent.width,
+            windowExtent.height,
+            1,
+    };
+
+    depthImage = createImage(depthImageExtent, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                             false);
 }

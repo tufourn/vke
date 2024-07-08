@@ -42,6 +42,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         imgui
         glfw)
 
+# Copy assets
+file(COPY assets DESTINATION ${CMAKE_BINARY_DIR})
+
 # Compile shaders
 file(GLOB_RECURSE GLSL_SOURCES
         "shaders/*.frag"

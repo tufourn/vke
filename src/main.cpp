@@ -24,10 +24,9 @@ void drawGeometry(VkCommandBuffer cmd);
 
 void setupVulkan();
 
-int main() {
-    vk.windowExtent = {1920, 1080};
-    vk.init();
+void terminateVulkan();
 
+int main() {
     setupVulkan();
 
     while (!glfwWindowShouldClose(vk.window)) {
@@ -124,19 +123,7 @@ int main() {
         currentFrame = (currentFrame + 1) % MAX_CONCURRENT_FRAMES;
     }
 
-    vkDeviceWaitIdle(vk.device);
-
-    for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
-        vk.frames[i].frameDescriptors.destroyPools(vk.device);
-    }
-    vkDestroyDescriptorSetLayout(vk.device, vkState.singleImageDescriptorLayout, nullptr);
-
-    vk.destroyImage(vkState.whiteImage);
-    vkDestroySampler(vk.device, vkState.defaultSamplerLinear, nullptr);
-
-    vkDestroyPipelineLayout(vk.device, vkState.trianglePipelineLayout, nullptr);
-    vkDestroyPipeline(vk.device, vkState.trianglePipeline, nullptr);
-    vk.terminate();
+    terminateVulkan();
 }
 
 void drawGeometry(VkCommandBuffer cmd) {
@@ -192,6 +179,9 @@ void drawGeometry(VkCommandBuffer cmd) {
 }
 
 void setupVulkan() {
+    vk.windowExtent = {1920, 1080};
+    vk.init();
+
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
                 {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
@@ -221,7 +211,7 @@ void setupVulkan() {
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkInit::pipelineLayoutCreateInfo();
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &vkState.singleImageDescriptorLayout;
-    VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutInfo, nullptr, &vkState.trianglePipelineLayout));
+    VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutInfo, nullptr, &vkState.trianglePipelineLayout))
 
     VkShaderModule triangleVertShader, triangleFragShader;
     VK_CHECK(vk.createShaderModule("textured_triangle.vert.spv", &triangleVertShader))
@@ -244,4 +234,20 @@ void setupVulkan() {
 
     vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
+}
+
+void terminateVulkan() {
+    vkDeviceWaitIdle(vk.device);
+
+    for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
+        vk.frames[i].frameDescriptors.destroyPools(vk.device);
+    }
+    vkDestroyDescriptorSetLayout(vk.device, vkState.singleImageDescriptorLayout, nullptr);
+
+    vk.destroyImage(vkState.whiteImage);
+    vkDestroySampler(vk.device, vkState.defaultSamplerLinear, nullptr);
+
+    vkDestroyPipelineLayout(vk.device, vkState.trianglePipelineLayout, nullptr);
+    vkDestroyPipeline(vk.device, vkState.trianglePipeline, nullptr);
+    vk.terminate();
 }
