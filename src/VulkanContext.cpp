@@ -4,6 +4,8 @@
 #include "VulkanInit.h"
 #include "Utils.h"
 
+#include <glm/glm.hpp>
+
 void VulkanContext::init() {
     initVulkanInstance();
     initWindow();

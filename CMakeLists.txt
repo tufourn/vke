@@ -17,6 +17,7 @@ option(GLFW_BUILD_DOCS OFF)
 option(GLFW_BUILD_EXAMPLES OFF)
 option(GLFW_BUILD_TESTS OFF)
 add_subdirectory(external/glfw)
+add_definitions(-DGLFW_INCLUDE_NONE)
 
 # Dear ImGui
 file(GLOB IMGUI_SOURCES
