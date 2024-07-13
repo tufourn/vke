@@ -2,7 +2,7 @@
 #extension GL_EXT_buffer_reference : require
 
 layout (location = 0) out vec3 outColor;
-layout (location = 1) out vec3 outUV;
+layout (location = 1) out vec2 outUV;
 
 struct Vertex {
     vec3 position;

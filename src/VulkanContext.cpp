@@ -357,6 +357,7 @@ GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<
         VkBufferCopy indexCopy = {0};
         indexCopy.dstOffset = 0;
         indexCopy.srcOffset = vertexBufferSize;
+        indexCopy.size = indexBufferSize;
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer,
                         1, &indexCopy);
     });
