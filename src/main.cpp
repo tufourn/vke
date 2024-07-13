@@ -5,6 +5,8 @@
 #include "VulkanInit.h"
 #include "VulkanPipeline.h"
 
+#include "Camera.h"
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -19,6 +21,8 @@ struct VulkanState {
 
     VkDescriptorSetLayout singleImageDescriptorLayout;
 } vkState;
+
+Camera camera;
 
 GPUMeshBuffers mesh;
 
@@ -38,10 +42,16 @@ void terminateVulkan();
 int main() {
     setupVulkan();
 
-    loadGLTF("assets/models/milk_truck/CesiumMilkTruck.gltf");
+    glfwSetWindowUserPointer(vk.window, &camera);
+    glfwSetCursorPosCallback(vk.window, Camera::mouseCallback);
+    glfwSetKeyCallback(vk.window, Camera::keyCallback);
+    glfwSetMouseButtonCallback(vk.window, Camera::mouseButtonCallback);
+
+    loadGLTF("assets/models/triangle/Triangle.gltf");
 
     while (!glfwWindowShouldClose(vk.window)) {
         glfwPollEvents();
+        camera.update();
 
         vkWaitForFences(vk.device, 1, &vk.frames[currentFrame].renderFence, VK_TRUE, 1e9);
         VK_CHECK(vkResetFences(vk.device, 1, &vk.frames[currentFrame].renderFence))
@@ -71,7 +81,7 @@ int main() {
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
-        VkClearColorValue clearValue = {{0.0f, 0.0f, 1.0f, 1.0f}};
+        VkClearColorValue clearValue = {{0.2f, 0.2f, 0.2f, 1.0f}};
 
         VkImageSubresourceRange clearRange = VkInit::imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -181,8 +191,8 @@ void drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    pc.worldMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.5f)) *
-                     glm::rotate(glm::mat4(1.0f), glm::radians(20.f), glm::vec3(0.0f, 1.0f, 1.f));
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+    pc.worldMatrix = projection * camera.getViewMatrix();
     pc.vertexBuffer = mesh.vertexBufferAddress;
 
     vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);

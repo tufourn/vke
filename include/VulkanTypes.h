@@ -7,8 +7,6 @@
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 
-#include <GLFW/glfw3.h>
-
 #include <memory>
 
 struct VulkanFeatures {
