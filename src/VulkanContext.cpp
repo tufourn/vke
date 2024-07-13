@@ -1,3 +1,7 @@
+#define VK_NO_PROTOTYPES
+#define VOLK_IMPLEMENTATION
+#define VMA_IMPLEMENTATION
+
 #include "VulkanContext.h"
 
 #include "VulkanUtils.h"
@@ -5,6 +9,7 @@
 #include "Utils.h"
 
 #include <glm/glm.hpp>
+#include <vk_mem_alloc.h>
 
 void VulkanContext::init() {
     initVulkanInstance();
@@ -115,8 +120,8 @@ void VulkanContext::createSwapchain() {
 
     auto ret = swapchainBuilder
             .set_desired_format(VkSurfaceFormatKHR{
-                    .format = swapchainImageFormat,
-                    .colorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
+                .format = swapchainImageFormat,
+                .colorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
             })
             .set_desired_extent(windowExtent.width, windowExtent.height)
             .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)
@@ -218,7 +223,7 @@ VulkanBuffer VulkanContext::createBuffer(size_t allocSize, VkBufferUsageFlags us
     VulkanBuffer newBuffer = {};
 
     VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &vmaAllocInfo,
-                             &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info))
+        &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info))
 
     return newBuffer;
 }
@@ -227,7 +232,8 @@ void VulkanContext::destroyBuffer(const VulkanBuffer &buffer) const {
     vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
 }
 
-VkResult VulkanContext::createShaderModule(std::filesystem::path shaderFile, VkShaderModule *shaderModule) const {
+VkResult VulkanContext::createShaderModule(const std::filesystem::path &shaderFile,
+                                           VkShaderModule *shaderModule) const {
     std::vector<char> code = readFile(shaderFile, true);
 
     VkShaderModuleCreateInfo info = {};
@@ -278,9 +284,9 @@ void VulkanContext::destroyImage(const VulkanImage &img) const {
 
 void VulkanContext::createDrawImage() {
     VkExtent3D drawImageExtent = {
-            windowExtent.width,
-            windowExtent.height,
-            1,
+        windowExtent.width,
+        windowExtent.height,
+        1,
     };
 
     VkImageUsageFlags drawImageUsages = 0;
@@ -312,7 +318,60 @@ void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&f
     VK_CHECK(vkWaitForFences(device, 1, &m_immediateFence, true, 1e9))
 }
 
-VulkanImage VulkanContext::createImage(void *data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
+GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices) {
+    const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
+    const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+    GPUMeshBuffers newSurface = {};
+
+    newSurface.vertexBuffer = createBuffer(vertexBufferSize,
+                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                           VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    VkBufferDeviceAddressInfo deviceAddressInfo = {};
+    deviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    deviceAddressInfo.buffer = newSurface.vertexBuffer.buffer;
+    newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAddressInfo);
+
+    newSurface.indexBuffer = createBuffer(indexBufferSize,
+                                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+
+    VulkanBuffer stagingBuffer = createBuffer(vertexBufferSize + indexBufferSize,
+                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                              VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    void *data = stagingBuffer.allocation->GetMappedData();
+
+    memcpy(data, vertices.data(), vertexBufferSize);
+    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, indices.data(), indexBufferSize);
+
+    immediateSubmit([&](VkCommandBuffer cmd) {
+        VkBufferCopy vertexCopy = {0};
+        vertexCopy.dstOffset = 0;
+        vertexCopy.srcOffset = 0;
+        vertexCopy.size = vertexBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.vertexBuffer.buffer,
+                        1, &vertexCopy);
+
+        VkBufferCopy indexCopy = {0};
+        indexCopy.dstOffset = 0;
+        indexCopy.srcOffset = vertexBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer,
+                        1, &indexCopy);
+    });
+
+    destroyBuffer(stagingBuffer);
+
+    return newSurface;
+}
+
+void VulkanContext::freeMesh(GPUMeshBuffers &meshBuffers) {
+    vmaDestroyBuffer(allocator, meshBuffers.indexBuffer.buffer, meshBuffers.indexBuffer.allocation);
+    vmaDestroyBuffer(allocator, meshBuffers.vertexBuffer.buffer, meshBuffers.vertexBuffer.allocation);
+}
+
+VulkanImage VulkanContext::createImage(const void *data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
                                        bool mipmapped) const {
     size_t dataSize = extent.depth * extent.width * extent.height * 4; // 1 byte for each rgba channel
 
@@ -361,9 +420,9 @@ VulkanImage VulkanContext::createImage(void *data, VkExtent3D extent, VkFormat f
 
 void VulkanContext::createDepthImage() {
     VkExtent3D depthImageExtent = {
-            windowExtent.width,
-            windowExtent.height,
-            1,
+        windowExtent.width,
+        windowExtent.height,
+        1,
     };
 
     depthImage = createImage(depthImageExtent, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,

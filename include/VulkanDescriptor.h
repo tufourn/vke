@@ -29,7 +29,7 @@ private:
     std::vector<PoolSizeRatio> m_ratios;
     std::vector<VkDescriptorPool> m_fullPools;
     std::vector<VkDescriptorPool> m_readyPools;
-    uint32_t m_setsPerPool;
+    uint32_t m_setsPerPool = 1024;
 };
 
 struct DescriptorWriter {

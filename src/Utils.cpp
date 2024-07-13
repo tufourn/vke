@@ -2,12 +2,9 @@
 
 #include <fstream>
 
-const std::string SHADERS_DIR = "/shaders/";
-
 std::vector<char> readFile(std::filesystem::path fileName, bool isBinary) {
     std::filesystem::path shaderPath = std::filesystem::current_path();
-    shaderPath += SHADERS_DIR;
-    shaderPath += fileName;
+    shaderPath /= fileName;
 
     std::ios_base::openmode mode = std::ios::ate;
     if (isBinary) {

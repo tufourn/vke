@@ -1,9 +1,12 @@
+#include <GltfLoader.h>
+
 #include "VulkanContext.h"
 #include "VulkanUtils.h"
 #include "VulkanInit.h"
 #include "VulkanPipeline.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 VulkanContext vk = {};
 
@@ -15,8 +18,14 @@ struct VulkanState {
     VkSampler defaultSamplerLinear;
 
     VkDescriptorSetLayout singleImageDescriptorLayout;
-
 } vkState;
+
+GPUMeshBuffers mesh;
+
+struct PushConstants {
+    glm::mat4 worldMatrix;
+    VkDeviceAddress vertexBuffer;
+} pc;
 
 uint32_t currentFrame = 0;
 
@@ -28,6 +37,8 @@ void terminateVulkan();
 
 int main() {
     setupVulkan();
+
+    loadGLTF("assets/models/milk_truck/CesiumMilkTruck.gltf");
 
     while (!glfwWindowShouldClose(vk.window)) {
         glfwPollEvents();
@@ -51,7 +62,7 @@ int main() {
         VK_CHECK(vkResetCommandBuffer(cmd, 0))
 
         VkCommandBufferBeginInfo cmdBeginInfo = VkInit::commandBufferBeginInfo(
-                VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo))
 
@@ -141,9 +152,7 @@ void drawGeometry(VkCommandBuffer cmd) {
 
     // bind texture
     VkDescriptorSet imageSet = vk.frames[currentFrame].frameDescriptors
-            .allocate(vk.device, vkState.singleImageDescriptorLayout);
-
-    {
+            .allocate(vk.device, vkState.singleImageDescriptorLayout); {
         DescriptorWriter writer;
         writer.writeImage(0, vkState.whiteImage.imageView, vkState.defaultSamplerLinear,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
@@ -172,6 +181,12 @@ void drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+    pc.worldMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.5f)) *
+                     glm::rotate(glm::mat4(1.0f), glm::radians(20.f), glm::vec3(0.0f, 1.0f, 1.f));
+    pc.vertexBuffer = mesh.vertexBufferAddress;
+
+    vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
     //launch a draw command to draw 3 vertices
     vkCmdDraw(cmd, 3, 1, 0, 0);
 
@@ -184,7 +199,7 @@ void setupVulkan() {
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
-                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
         };
 
         vk.frames[i].frameDescriptors = DescriptorAllocator();
@@ -200,22 +215,28 @@ void setupVulkan() {
     samplerInfo.minFilter = VK_FILTER_LINEAR;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
 
-    vkCreateSampler(vk.device, &samplerInfo, nullptr, &vkState.defaultSamplerLinear);
-
-    {
+    vkCreateSampler(vk.device, &samplerInfo, nullptr, &vkState.defaultSamplerLinear); {
         DescriptorLayoutBuilder descriptorLayoutBuilder;
         descriptorLayoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         vkState.singleImageDescriptorLayout = descriptorLayoutBuilder.build(vk.device, VK_SHADER_STAGE_FRAGMENT_BIT);
     }
 
+    VkPushConstantRange pushConstantsRange = {};
+    pushConstantsRange.offset = 0;
+    pushConstantsRange.size = sizeof(PushConstants);
+    pushConstantsRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkInit::pipelineLayoutCreateInfo();
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &vkState.singleImageDescriptorLayout;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantsRange;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+
     VK_CHECK(vkCreatePipelineLayout(vk.device, &pipelineLayoutInfo, nullptr, &vkState.trianglePipelineLayout))
 
     VkShaderModule triangleVertShader, triangleFragShader;
-    VK_CHECK(vk.createShaderModule("textured_triangle.vert.spv", &triangleVertShader))
-    VK_CHECK(vk.createShaderModule("textured_triangle.frag.spv", &triangleFragShader))
+    VK_CHECK(vk.createShaderModule("shaders/mesh_triangle.vert.spv", &triangleVertShader))
+    VK_CHECK(vk.createShaderModule("shaders/textured_triangle.frag.spv", &triangleFragShader))
 
     PipelineBuilder trianglePipelineBuilder;
     trianglePipelineBuilder
@@ -234,10 +255,29 @@ void setupVulkan() {
 
     vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
+
+    // Vertices of the triangle
+    Vertex vertices[] = {
+        // Vertex 0
+        {glm::vec3(1.f, 1.f, 0.f), 1.0f, glm::vec3(0.0f, 0.0f, 1.0f), 1.0f},
+        // Vertex 1
+        {glm::vec3(-1.f, 1.f, 0.f), 0.0f, glm::vec3(0.0f, 0.0f, 1.0f), 1.0f},
+        // Vertex 2
+        {glm::vec3(0.f, -1.f, 0.f), 0.5f, glm::vec3(0.0f, 0.0f, 1.0f), 0.0f}
+    };
+
+    // Indices to form a single triangle
+    uint32_t indices[] = {
+        0, 1, 2
+    };
+
+    mesh = vk.uploadMesh(indices, vertices);
 }
 
 void terminateVulkan() {
     vkDeviceWaitIdle(vk.device);
+
+    vk.freeMesh(mesh);
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         vk.frames[i].frameDescriptors.destroyPools(vk.device);

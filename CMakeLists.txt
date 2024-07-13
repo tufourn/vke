@@ -29,7 +29,9 @@ add_library(imgui STATIC ${IMGUI_SOURCES})
 include_directories(include
         external/imgui/
         external/glfw/include
-        external/glm/)
+        external/glm/
+        external/cgltf/
+)
 
 # Sources
 file(GLOB_RECURSE SOURCES src/*.cpp)

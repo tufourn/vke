@@ -1,4 +1,7 @@
 [Bb]uild/
 cmake-build-*/
 
+compile_commands.json
+
+.cache
 .idea/

@@ -4,37 +4,17 @@
 
 #include <volk.h>
 #include <VkBootstrap.h>
-#include <GLFW/glfw3.h>
 #include <vk_mem_alloc.h>
+
+#include <GLFW/glfw3.h>
 
 #include <vector>
 #include <array>
 #include <filesystem>
 #include <functional>
+
+#include "VulkanTypes.h"
 #include "VulkanDescriptor.h"
-
-constexpr int MAX_CONCURRENT_FRAMES = 2;
-
-struct VulkanFeatures {
-    bool dynamicRendering = true;
-    bool synchronization2 = true;
-    bool bufferDeviceAddress = true;
-    bool descriptorIndexing = true;
-};
-
-struct VulkanBuffer {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocationInfo info;
-};
-
-struct VulkanImage {
-    VkImage image;
-    VkImageView imageView;
-    VmaAllocation allocation;
-    VkExtent3D imageExtent;
-    VkFormat imageFormat;
-};
 
 struct FrameData {
     VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
@@ -44,6 +24,8 @@ struct FrameData {
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     DescriptorAllocator frameDescriptors = {};
 };
+
+constexpr int MAX_CONCURRENT_FRAMES = 2;
 
 struct VulkanContext {
     vkb::Instance instance = {};
@@ -81,7 +63,7 @@ struct VulkanContext {
 
     void resizeWindow();
 
-    VkResult createShaderModule(std::filesystem::path shaderFile, VkShaderModule *shaderModule) const;
+    VkResult createShaderModule(const std::filesystem::path &shaderFile, VkShaderModule *shaderModule) const;
 
     [[nodiscard]] VulkanBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
                                             VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_AUTO) const;
@@ -91,17 +73,20 @@ struct VulkanContext {
     [[nodiscard]] VulkanImage createImage(VkExtent3D extent,
                                           VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
 
-    [[nodiscard]] VulkanImage createImage(void *data, VkExtent3D extent,
+    [[nodiscard]] VulkanImage createImage(const void *data, VkExtent3D extent,
                                           VkFormat format, VkImageUsageFlags usage, bool mipmapped) const;
 
     void destroyImage(const VulkanImage &img) const;
 
     void immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&function) const;
 
+    GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+    void freeMesh(GPUMeshBuffers& meshBuffers);
+
 private:
-    VkFence m_immediateFence;
-    VkCommandBuffer m_immediateCommandBuffer;
-    VkCommandPool m_immediateCommandPool;
+    VkFence m_immediateFence = VK_NULL_HANDLE;
+    VkCommandBuffer m_immediateCommandBuffer = VK_NULL_HANDLE;
+    VkCommandPool m_immediateCommandPool = VK_NULL_HANDLE;
 
     void initVulkanInstance();
 
@@ -125,5 +110,3 @@ private:
 
     void initVmaAllocator();
 };
-
-

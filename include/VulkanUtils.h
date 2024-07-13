@@ -3,8 +3,11 @@
 #include <volk.h>
 #include <vulkan/vk_enum_string_helper.h>
 
+#include "VulkanTypes.h"
+
 #include <iostream>
 #include <cassert>
+#include <span>
 
 #define VK_CHECK(func) \
 { \
@@ -26,5 +29,4 @@ namespace VkUtil {
                          VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask);
 
     void copyImageToImage(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize, VkExtent2D dstSize);
-
 }
