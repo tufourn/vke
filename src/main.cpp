@@ -24,7 +24,7 @@ struct VulkanState {
 
 Camera camera;
 
-GPUMeshBuffers mesh;
+std::vector<std::shared_ptr<Mesh> > model;
 
 struct PushConstants {
     glm::mat4 worldMatrix;
@@ -46,8 +46,6 @@ int main() {
     glfwSetCursorPosCallback(vk.window, Camera::mouseCallback);
     glfwSetKeyCallback(vk.window, Camera::keyCallback);
     glfwSetMouseButtonCallback(vk.window, Camera::mouseButtonCallback);
-
-    loadGLTF("assets/models/triangle/Triangle.gltf");
 
     while (!glfwWindowShouldClose(vk.window)) {
         glfwPollEvents();
@@ -192,13 +190,20 @@ void drawGeometry(VkCommandBuffer cmd) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
-    pc.worldMatrix = projection * camera.getViewMatrix();
-    pc.vertexBuffer = mesh.vertexBufferAddress;
 
-    vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+    for (auto &mesh: model) {
+        pc.worldMatrix = projection * camera.getViewMatrix();
+        pc.vertexBuffer = mesh->meshBuffers.vertexBufferAddress;
 
-    //launch a draw command to draw 3 vertices
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants),
+                           &pc);
+
+        for (auto& meshPrim : mesh->meshPrimitives) {
+            vkCmdBindIndexBuffer(cmd, mesh->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, meshPrim.indexCount, 1, meshPrim.startIndex, 0, 0);
+        }
+
+    }
 
     vkCmdEndRendering(cmd);
 }
@@ -266,28 +271,15 @@ void setupVulkan() {
     vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
 
-    // Vertices of the triangle
-    Vertex vertices[] = {
-        // Vertex 0
-        {glm::vec3(1.f, 1.f, 0.f), 1.0f, glm::vec3(0.0f, 0.0f, 1.0f), 1.0f},
-        // Vertex 1
-        {glm::vec3(-1.f, 1.f, 0.f), 0.0f, glm::vec3(0.0f, 0.0f, 1.0f), 1.0f},
-        // Vertex 2
-        {glm::vec3(0.f, -1.f, 0.f), 0.5f, glm::vec3(0.0f, 0.0f, 1.0f), 0.0f}
-    };
-
-    // Indices to form a single triangle
-    uint32_t indices[] = {
-        0, 1, 2
-    };
-
-    mesh = vk.uploadMesh(indices, vertices);
+    model = loadGLTF(&vk, "assets/models/box/Box.gltf");
 }
 
 void terminateVulkan() {
     vkDeviceWaitIdle(vk.device);
 
-    vk.freeMesh(mesh);
+    for (auto &mesh: model) {
+        vk.freeMesh(mesh->meshBuffers);
+    }
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         vk.frames[i].frameDescriptors.destroyPools(vk.device);

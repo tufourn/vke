@@ -4,21 +4,26 @@
 #include <filesystem>
 #include <optional>
 
+#include "VulkanContext.h"
 #include "VulkanTypes.h"
 
-struct GeoSurface {
+struct MeshPrimitive {
     uint32_t startIndex;
-    uint32_t count;
+    uint32_t indexCount;
+    uint32_t vertexCount;
+    bool hasIndices;
 };
 
-struct MeshAsset {
+struct Mesh {
     std::string name;
-    std::vector<GeoSurface> surfaces;
-
+    std::vector<MeshPrimitive> meshPrimitives;
+    GPUMeshBuffers meshBuffers;
 };
 
-struct LoadedGLTF : public IRenderable {
+struct Scene : public IRenderable {
+    std::vector<Mesh> meshes;
+
     void draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
 
-std::optional<std::shared_ptr<LoadedGLTF>> loadGLTF(std::filesystem::path filePath);
+std::vector<std::shared_ptr<Mesh>> loadGLTF(VulkanContext *vk, std::filesystem::path filePath);
