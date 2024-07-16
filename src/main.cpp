@@ -191,19 +191,21 @@ void drawGeometry(VkCommandBuffer cmd) {
 
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
 
-    pc.worldMatrix = projection * camera.getViewMatrix();
-    pc.vertexBuffer = scene.value().buffers.vertexBufferAddress;
 
-    for (auto &mesh: scene.value().meshes) {
-        vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants),
-                           &pc);
-
-        for (auto &meshPrim: mesh->meshPrimitives) {
-            if (meshPrim.hasIndices) {
-                vkCmdBindIndexBuffer(cmd, scene.value().buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(cmd, meshPrim.indexCount, 1, meshPrim.indexStart, 0, 0);
-            } else {
-                vkCmdDraw(cmd, meshPrim.vertexCount, 1, meshPrim.vertexStart, 0);
+    for (auto &node: scene->topLevelNodes) {
+        if (node->mesh != nullptr) {
+            for (auto &meshPrim: node->mesh->meshPrimitives) {
+                pc.worldMatrix = projection * camera.getViewMatrix() * node->worldTransform;
+                pc.vertexBuffer = scene.value().buffers.vertexBufferAddress;
+                vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                                   sizeof(PushConstants),
+                                   &pc);
+                if (meshPrim.hasIndices) {
+                    vkCmdBindIndexBuffer(cmd, scene.value().buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd, meshPrim.indexCount, 1, meshPrim.indexStart, 0, 0);
+                } else {
+                    vkCmdDraw(cmd, meshPrim.vertexCount, 1, meshPrim.vertexStart, 0);
+                }
             }
         }
     }

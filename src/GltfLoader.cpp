@@ -1,13 +1,12 @@
 #include "GltfLoader.h"
 
 #define CGLTF_IMPLEMENTATION
+#define GLM_ENABLE_EXPERIMENTAL
 #include <cgltf.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <iostream>
-
-void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-}
 
 std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath) {
     std::filesystem::path gltfPath = std::filesystem::current_path() / filePath;
@@ -32,17 +31,17 @@ std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath)
     std::vector<uint32_t> indexBuffer;
     std::vector<Vertex> vertexBuffer;
 
-    scene.meshes = parseMesh(data, indexBuffer, vertexBuffer);
+    parseMesh(data, scene.meshes, indexBuffer, vertexBuffer);
+    parseNodes(data, scene);
+
     scene.buffers = vk->uploadMesh(indexBuffer, vertexBuffer);
 
     cgltf_free(data);
     return scene;
 }
 
-std::vector<std::shared_ptr<Mesh> > parseMesh(cgltf_data *data, std::vector<uint32_t> &indexBuffer,
-                                              std::vector<Vertex> &vertexBuffer) {
-    std::vector<std::shared_ptr<Mesh> > meshes;
-
+void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
+               std::vector<uint32_t> &indexBuffer, std::vector<Vertex> &vertexBuffer) {
     for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
         Mesh newMesh = {};
 
@@ -116,7 +115,7 @@ std::vector<std::shared_ptr<Mesh> > parseMesh(cgltf_data *data, std::vector<uint
                     }
                     default:
                         std::cerr << newMesh.name << ": invalid primitive index component type" << std::endl;
-                        return {};
+                        return;
                 }
             }
 
@@ -124,6 +123,62 @@ std::vector<std::shared_ptr<Mesh> > parseMesh(cgltf_data *data, std::vector<uint
         }
         meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
     }
-
-    return meshes;
 }
+
+void parseNodes(cgltf_data *data, Scene &scene) {
+    for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
+        cgltf_node gltfNode = data->nodes[node_i];
+        std::shared_ptr<Node> newNode = std::make_shared<Node>();
+
+        if (gltfNode.name != nullptr) {
+            newNode->name = gltfNode.name;
+        }
+
+        if (gltfNode.mesh != nullptr) {
+            newNode->mesh = scene.meshes[gltfNode.mesh - data->meshes];
+        }
+
+        glm::mat4 translation = glm::translate(glm::mat4(1.f), {
+                                                   gltfNode.translation[0],
+                                                   gltfNode.translation[1],
+                                                   gltfNode.translation[2]
+                                               });
+
+        glm::quat rotation = glm::quat(gltfNode.rotation[3],
+                                       gltfNode.rotation[0],
+                                       gltfNode.rotation[1],
+                                       gltfNode.rotation[2]);
+
+        glm::mat4 scale = glm::scale(glm::mat4(1.f), {
+                                         gltfNode.scale[0],
+                                         gltfNode.scale[1],
+                                         gltfNode.scale[2]
+                                     });
+
+        newNode->localTransform = translation * glm::toMat4(rotation) * scale;
+
+        scene.nodes.emplace_back(newNode);
+    }
+
+    for (size_t parentNode_i = 0; parentNode_i < data->nodes_count; parentNode_i++) {
+        cgltf_node gltfParentNode = data->nodes[parentNode_i];
+
+        for (size_t child_i = 0; child_i < gltfParentNode.children_count; child_i++) {
+            size_t childNode_i = gltfParentNode.children[child_i] - data->nodes;
+            scene.nodes[parentNode_i]->children.push_back(scene.nodes[childNode_i]);
+            scene.nodes[childNode_i]->parent = scene.nodes[parentNode_i];
+        }
+    }
+
+    for (auto& node : scene.nodes) {
+        if (node->parent.lock() == nullptr) {
+            scene.topLevelNodes.push_back(node);
+            node->updateWorldTransform(glm::mat4(1.f));
+        }
+    }
+}
+
+void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
+    //todo
+}
+
