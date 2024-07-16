@@ -8,7 +8,7 @@ class Camera {
 public:
     glm::vec3 velocity = glm::vec3(0.f);
     glm::vec3 position = glm::vec3(0.f, 0.f, 5.f);
-    float speed = 0.002f;
+    float speed = 0.05f;
 
     bool shouldRotateCamera = false;
     float sensitivity = 0.0005f;

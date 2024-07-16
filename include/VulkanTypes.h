@@ -65,3 +65,16 @@ struct Node : public IRenderable {
 
     void draw(const glm::mat4& topMatrix, DrawContext& ctx) override = 0;
 };
+
+struct MeshPrimitive {
+    uint32_t indexStart;
+    uint32_t vertexStart;
+    uint32_t indexCount;
+    uint32_t vertexCount;
+    bool hasIndices;
+};
+
+struct Mesh {
+    std::string name;
+    std::vector<MeshPrimitive> meshPrimitives;
+};

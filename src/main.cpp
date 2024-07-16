@@ -24,7 +24,7 @@ struct VulkanState {
 
 Camera camera;
 
-std::vector<std::shared_ptr<Mesh> > model;
+std::optional<Scene> scene;
 
 struct PushConstants {
     glm::mat4 worldMatrix;
@@ -189,20 +189,23 @@ void drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
 
-    for (auto &mesh: model) {
-        pc.worldMatrix = projection * camera.getViewMatrix();
-        pc.vertexBuffer = mesh->meshBuffers.vertexBufferAddress;
+    pc.worldMatrix = projection * camera.getViewMatrix();
+    pc.vertexBuffer = scene.value().buffers.vertexBufferAddress;
 
+    for (auto &mesh: scene.value().meshes) {
         vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants),
                            &pc);
 
-        for (auto& meshPrim : mesh->meshPrimitives) {
-            vkCmdBindIndexBuffer(cmd, mesh->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, meshPrim.indexCount, 1, meshPrim.startIndex, 0, 0);
+        for (auto &meshPrim: mesh->meshPrimitives) {
+            if (meshPrim.hasIndices) {
+                vkCmdBindIndexBuffer(cmd, scene.value().buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, meshPrim.indexCount, 1, meshPrim.indexStart, 0, 0);
+            } else {
+                vkCmdDraw(cmd, meshPrim.vertexCount, 1, meshPrim.vertexStart, 0);
+            }
         }
-
     }
 
     vkCmdEndRendering(cmd);
@@ -271,15 +274,13 @@ void setupVulkan() {
     vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
 
-    model = loadGLTF(&vk, "assets/models/box/Box.gltf");
+    scene = loadGLTF(&vk, "assets/models/triangle/SimpleMeshes.gltf");
 }
 
 void terminateVulkan() {
     vkDeviceWaitIdle(vk.device);
 
-    for (auto &mesh: model) {
-        vk.freeMesh(mesh->meshBuffers);
-    }
+    vk.freeMesh(scene->buffers);
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         vk.frames[i].frameDescriptors.destroyPools(vk.device);

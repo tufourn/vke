@@ -6,7 +6,10 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 
-std::vector<std::shared_ptr<Mesh> > loadGLTF(VulkanContext *vk, std::filesystem::path filePath) {
+void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
+}
+
+std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath) {
     std::filesystem::path gltfPath = std::filesystem::current_path() / filePath;
     cgltf_options options = {};
     cgltf_data *data = nullptr;
@@ -24,10 +27,21 @@ std::vector<std::shared_ptr<Mesh> > loadGLTF(VulkanContext *vk, std::filesystem:
         return {};
     }
 
-    std::vector<std::shared_ptr<Mesh> > meshes;
+    Scene scene;
 
     std::vector<uint32_t> indexBuffer;
     std::vector<Vertex> vertexBuffer;
+
+    scene.meshes = parseMesh(data, indexBuffer, vertexBuffer);
+    scene.buffers = vk->uploadMesh(indexBuffer, vertexBuffer);
+
+    cgltf_free(data);
+    return scene;
+}
+
+std::vector<std::shared_ptr<Mesh> > parseMesh(cgltf_data *data, std::vector<uint32_t> &indexBuffer,
+                                              std::vector<Vertex> &vertexBuffer) {
+    std::vector<std::shared_ptr<Mesh> > meshes;
 
     for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
         Mesh newMesh = {};
@@ -57,11 +71,12 @@ std::vector<std::shared_ptr<Mesh> > loadGLTF(VulkanContext *vk, std::filesystem:
                     const std::byte *posBuffer = static_cast<const std::byte *>(posBufferView->buffer->data);
                     for (size_t pos_i = 0; pos_i < gltfAccessor->count; pos_i++) {
                         Vertex vertex = {};
-                        size_t bufIndex = gltfAccessor->offset + (vertexStart + pos_i) * cgltf_calc_size(
-                                              gltfAccessor->type, gltfAccessor->component_type);
+                        size_t bufIndex = gltfAccessor->offset + posBufferView->offset +
+                                          (vertexStart + pos_i) * gltfAccessor->stride;
 
                         vertex.position = glm::make_vec3(
-                            reinterpret_cast<const float *>(&posBuffer[bufIndex]));
+                            reinterpret_cast<const float *>(&posBuffer[bufIndex])
+                        );
 
                         vertexBuffer.push_back(vertex);
                     }
@@ -74,7 +89,8 @@ std::vector<std::shared_ptr<Mesh> > loadGLTF(VulkanContext *vk, std::filesystem:
                 const cgltf_buffer_view *indexBufferView = gltfIndexAccessor->buffer_view;
                 const std::byte *indBuffer = static_cast<const std::byte *>(indexBufferView->buffer->data);
 
-                size_t bufOffset = gltfIndexAccessor->offset + indexBufferView->offset;
+                size_t bufOffset = gltfIndexAccessor->offset + indexBufferView->offset +
+                                   indexStart * gltfIndexAccessor->stride;
 
                 switch (cgltf_component_size(gltfIndexAccessor->component_type)) {
                     case 4: {
@@ -104,12 +120,10 @@ std::vector<std::shared_ptr<Mesh> > loadGLTF(VulkanContext *vk, std::filesystem:
                 }
             }
 
-            newMesh.meshPrimitives.emplace_back(indexStart, indexCount, vertexCount, hasIndices);
+            newMesh.meshPrimitives.emplace_back(indexStart, vertexStart, indexCount, vertexCount, hasIndices);
         }
-        newMesh.meshBuffers = vk->uploadMesh(indexBuffer, vertexBuffer);
         meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
     }
 
-    cgltf_free(data);
     return meshes;
 }

@@ -124,7 +124,7 @@ void VulkanContext::createSwapchain() {
                 .colorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
             })
             .set_desired_extent(windowExtent.width, windowExtent.height)
-            .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)
+            .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
             .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
             .set_old_swapchain(swapchain)
             .build();
@@ -324,6 +324,12 @@ GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<
 
     GPUMeshBuffers newSurface = {};
 
+    VulkanBuffer stagingBuffer = createBuffer(vertexBufferSize + indexBufferSize,
+                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                              VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    void *data = stagingBuffer.allocation->GetMappedData();
+
     newSurface.vertexBuffer = createBuffer(vertexBufferSize,
                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -332,19 +338,15 @@ GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<
     deviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     deviceAddressInfo.buffer = newSurface.vertexBuffer.buffer;
     newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAddressInfo);
-
-    newSurface.indexBuffer = createBuffer(indexBufferSize,
-                                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-
-    VulkanBuffer stagingBuffer = createBuffer(vertexBufferSize + indexBufferSize,
-                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                              VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-    void *data = stagingBuffer.allocation->GetMappedData();
-
     memcpy(data, vertices.data(), vertexBufferSize);
-    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, indices.data(), indexBufferSize);
+
+    if (indexBufferSize != 0) {
+        newSurface.indexBuffer = createBuffer(indexBufferSize,
+                                              VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                              VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, indices.data(), indexBufferSize);
+    }
+
 
     immediateSubmit([&](VkCommandBuffer cmd) {
         VkBufferCopy vertexCopy = {0};
@@ -354,12 +356,14 @@ GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.vertexBuffer.buffer,
                         1, &vertexCopy);
 
-        VkBufferCopy indexCopy = {0};
-        indexCopy.dstOffset = 0;
-        indexCopy.srcOffset = vertexBufferSize;
-        indexCopy.size = indexBufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer,
-                        1, &indexCopy);
+        if (indexBufferSize != 0) {
+            VkBufferCopy indexCopy = {0};
+            indexCopy.dstOffset = 0;
+            indexCopy.srcOffset = vertexBufferSize;
+            indexCopy.size = indexBufferSize;
+            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer,
+                            1, &indexCopy);
+        }
     });
 
     destroyBuffer(stagingBuffer);
