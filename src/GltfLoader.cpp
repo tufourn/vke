@@ -33,8 +33,8 @@ std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath)
 
     parseMesh(data, scene.meshes, indexBuffer, vertexBuffer);
     parseNodes(data, scene);
-
     scene.buffers = vk->uploadMesh(indexBuffer, vertexBuffer);
+
 
     cgltf_free(data);
     return scene;
@@ -68,13 +68,14 @@ void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
                     vertexCount = gltfAccessor->count;
                     const cgltf_buffer_view *posBufferView = gltfAccessor->buffer_view;
                     const std::byte *posBuffer = static_cast<const std::byte *>(posBufferView->buffer->data);
+
                     for (size_t pos_i = 0; pos_i < gltfAccessor->count; pos_i++) {
                         Vertex vertex = {};
-                        size_t bufIndex = gltfAccessor->offset + posBufferView->offset +
-                                          (vertexStart + pos_i) * gltfAccessor->stride;
+                        size_t bufOffset = gltfAccessor->offset + posBufferView->offset +
+                                          pos_i * gltfAccessor->stride;
 
                         vertex.position = glm::make_vec3(
-                            reinterpret_cast<const float *>(&posBuffer[bufIndex])
+                            reinterpret_cast<const float *>(&posBuffer[bufOffset])
                         );
 
                         vertexBuffer.push_back(vertex);
@@ -88,8 +89,7 @@ void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
                 const cgltf_buffer_view *indexBufferView = gltfIndexAccessor->buffer_view;
                 const std::byte *indBuffer = static_cast<const std::byte *>(indexBufferView->buffer->data);
 
-                size_t bufOffset = gltfIndexAccessor->offset + indexBufferView->offset +
-                                   indexStart * gltfIndexAccessor->stride;
+                size_t bufOffset = gltfIndexAccessor->offset + indexBufferView->offset;
 
                 switch (cgltf_component_size(gltfIndexAccessor->component_type)) {
                     case 4: {
@@ -178,7 +178,32 @@ void parseNodes(cgltf_data *data, Scene &scene) {
     }
 }
 
+void Node::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
+    if (mesh != nullptr) {
+        glm::mat4 nodeMatrix = topMatrix * worldTransform;
+
+        for (auto& meshPrimitive : mesh->meshPrimitives) {
+            RenderObject renderObject = {};
+            renderObject.indexStart = meshPrimitive.indexStart;
+            renderObject.vertexStart = meshPrimitive.vertexStart;
+            renderObject.indexCount = meshPrimitive.indexCount;
+            renderObject.vertexCount = meshPrimitive.vertexCount;
+            renderObject.hasIndices = meshPrimitive.hasIndices;
+
+            renderObject.transform = nodeMatrix;
+
+            ctx.renderObjects.push_back(renderObject);
+        }
+    }
+
+    for (auto& child : children) {
+        child->draw(topMatrix, ctx);
+    }
+}
+
 void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-    //todo
+    for (auto& node : topLevelNodes) {
+        node->draw(topMatrix, ctx);
+    }
 }
 

@@ -24,7 +24,7 @@ struct VulkanState {
 
 Camera camera;
 
-std::optional<Scene> scene;
+std::optional<Scene> sc;
 
 struct PushConstants {
     glm::mat4 worldMatrix;
@@ -191,22 +191,23 @@ void drawGeometry(VkCommandBuffer cmd) {
 
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
 
+    DrawContext ctx;
+    ctx.indexBuffer = sc->buffers.indexBuffer.buffer;
+    ctx.vertexBufferAddress = sc->buffers.vertexBufferAddress;
 
-    for (auto &node: scene->topLevelNodes) {
-        if (node->mesh != nullptr) {
-            for (auto &meshPrim: node->mesh->meshPrimitives) {
-                pc.worldMatrix = projection * camera.getViewMatrix() * node->worldTransform;
-                pc.vertexBuffer = scene.value().buffers.vertexBufferAddress;
-                vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                                   sizeof(PushConstants),
-                                   &pc);
-                if (meshPrim.hasIndices) {
-                    vkCmdBindIndexBuffer(cmd, scene.value().buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd, meshPrim.indexCount, 1, meshPrim.indexStart, 0, 0);
-                } else {
-                    vkCmdDraw(cmd, meshPrim.vertexCount, 1, meshPrim.vertexStart, 0);
-                }
-            }
+    sc->draw(glm::mat4(1.f), ctx);
+
+    for (auto &renderObject: ctx.renderObjects) {
+        pc.worldMatrix = projection * camera.getViewMatrix() * renderObject.transform;
+        pc.vertexBuffer = ctx.vertexBufferAddress;
+        vkCmdPushConstants(cmd, vkState.trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(PushConstants),
+                           &pc);
+        if (renderObject.hasIndices) {
+            vkCmdBindIndexBuffer(cmd, ctx.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, renderObject.indexCount, 1, renderObject.indexStart, 0, 1);
+        } else {
+            vkCmdDraw(cmd, renderObject.vertexCount, 1, renderObject.vertexStart, 0);
         }
     }
 
@@ -276,13 +277,13 @@ void setupVulkan() {
     vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
 
-    scene = loadGLTF(&vk, "assets/models/triangle/SimpleMeshes.gltf");
+    sc = loadGLTF(&vk, "assets/models/milk_truck/CesiumMilkTruck.gltf");
 }
 
 void terminateVulkan() {
     vkDeviceWaitIdle(vk.device);
 
-    vk.freeMesh(scene->buffers);
+    vk.freeMesh(sc->buffers);
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         vk.frames[i].frameDescriptors.destroyPools(vk.device);

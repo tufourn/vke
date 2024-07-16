@@ -9,6 +9,7 @@
 #include "VulkanTypes.h"
 
 struct DrawContext;
+struct Scene;
 
 class IRenderable {
     virtual void draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
@@ -27,6 +28,23 @@ struct Mesh {
     std::vector<MeshPrimitive> meshPrimitives;
 };
 
+struct RenderObject {
+    uint32_t indexStart;
+    uint32_t vertexStart;
+    uint32_t indexCount;
+    uint32_t vertexCount;
+    bool hasIndices;
+
+    glm::mat4 transform;
+};
+
+struct DrawContext {
+    std::vector<RenderObject> renderObjects;
+
+    VkBuffer indexBuffer;
+    VkDeviceAddress vertexBufferAddress;
+};
+
 struct Node : public IRenderable {
     std::string name;
     std::weak_ptr<Node> parent;
@@ -34,8 +52,8 @@ struct Node : public IRenderable {
 
     std::shared_ptr<Mesh> mesh;
 
-    glm::mat4 localTransform;
-    glm::mat4 worldTransform;
+    glm::mat4 localTransform = glm::mat4(1.f);
+    glm::mat4 worldTransform = glm::mat4(1.f);
 
     void updateWorldTransform(const glm::mat4& parentMatrix) {
         worldTransform = parentMatrix * localTransform;
@@ -44,13 +62,7 @@ struct Node : public IRenderable {
         }
     }
 
-    void draw(const glm::mat4& topMatrix, DrawContext& ctx) override {
-        //todo
-    }
-};
-
-struct DrawContext {
-    std::vector<MeshPrimitive> meshPrimitives;
+    void draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
 
 struct Scene : public IRenderable {
@@ -58,7 +70,6 @@ struct Scene : public IRenderable {
 
     std::vector<std::shared_ptr<Node> > nodes;
     std::vector<std::shared_ptr<Node>> topLevelNodes;
-
 
     GPUMeshBuffers buffers;
 
