@@ -162,7 +162,9 @@ void drawGeometry(VkCommandBuffer cmd) {
     VkDescriptorSet imageSet = vk.frames[currentFrame].frameDescriptors
             .allocate(vk.device, vkState.singleImageDescriptorLayout); {
         DescriptorWriter writer;
-        writer.writeImage(0, vkState.whiteImage.imageView, vkState.defaultSamplerLinear,
+        // writer.writeImage(0, vkState.whiteImage.imageView, vkState.defaultSamplerLinear,
+        //                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.writeImage(0, sc.value().images[0].imageView, vkState.defaultSamplerLinear,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         writer.updateSet(vk.device, imageSet);
     }
@@ -190,6 +192,7 @@ void drawGeometry(VkCommandBuffer cmd) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
+    projection[1][1] *= -1; // flip y
 
     DrawContext ctx;
     ctx.indexBuffer = sc->buffers.indexBuffer.buffer;
@@ -236,11 +239,11 @@ void setupVulkan() {
     samplerInfo.minFilter = VK_FILTER_LINEAR;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
 
-    vkCreateSampler(vk.device, &samplerInfo, nullptr, &vkState.defaultSamplerLinear); {
-        DescriptorLayoutBuilder descriptorLayoutBuilder;
-        descriptorLayoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        vkState.singleImageDescriptorLayout = descriptorLayoutBuilder.build(vk.device, VK_SHADER_STAGE_FRAGMENT_BIT);
-    }
+    vkCreateSampler(vk.device, &samplerInfo, nullptr, &vkState.defaultSamplerLinear);
+
+    DescriptorLayoutBuilder descriptorLayoutBuilder;
+    descriptorLayoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    vkState.singleImageDescriptorLayout = descriptorLayoutBuilder.build(vk.device, VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkPushConstantRange pushConstantsRange = {};
     pushConstantsRange.offset = 0;
@@ -277,13 +280,14 @@ void setupVulkan() {
     vkDestroyShaderModule(vk.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vk.device, triangleFragShader, nullptr);
 
+    // sc = loadGLTF(&vk, "assets/models/box/BoxTextured.gltf");
     sc = loadGLTF(&vk, "assets/models/milk_truck/CesiumMilkTruck.gltf");
 }
 
 void terminateVulkan() {
     vkDeviceWaitIdle(vk.device);
 
-    vk.freeMesh(sc->buffers);
+    sc.value().clear();
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         vk.frames[i].frameDescriptors.destroyPools(vk.device);

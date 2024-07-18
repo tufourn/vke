@@ -2,11 +2,14 @@
 
 #define CGLTF_IMPLEMENTATION
 #define GLM_ENABLE_EXPERIMENTAL
+#define STB_IMAGE_IMPLEMENTATION
 #include <cgltf.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <stb_image.h>
 #include <iostream>
+#include <Utils.h>
 
 std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath) {
     std::filesystem::path gltfPath = std::filesystem::current_path() / filePath;
@@ -27,21 +30,96 @@ std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath)
     }
 
     Scene scene;
+    scene.vulkanContext = vk;
 
-    std::vector<uint32_t> indexBuffer;
-    std::vector<Vertex> vertexBuffer;
-
-    parseMesh(data, scene.meshes, indexBuffer, vertexBuffer);
+    parseImages(data, scene, gltfPath);
+    parseMesh(data, scene);
     parseNodes(data, scene);
-    scene.buffers = vk->uploadMesh(indexBuffer, vertexBuffer);
-
 
     cgltf_free(data);
     return scene;
 }
 
-void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
-               std::vector<uint32_t> &indexBuffer, std::vector<Vertex> &vertexBuffer) {
+void parseImages(const cgltf_data *data, Scene &scene, std::filesystem::path gltfPath) {
+    std::filesystem::path directory = gltfPath.parent_path();
+
+    for (size_t image_i = 0; image_i < data->images_count; image_i++) {
+        const cgltf_image *gltfImage = &data->images[image_i];
+        const char *uri = gltfImage->uri;
+
+        VulkanImage newImage = {};
+        int width, height, numChannels;
+
+        if (uri) {
+            if (strncmp(uri, "data:", 5) == 0) {
+                // embedded image
+                const char *comma = strchr(uri, ',');
+                if (comma && comma - uri >= 7 && strncmp(comma - 7, ";base64", 7) == 0) {
+                    const char *base64 = comma + 1;
+                    const size_t base64Size = strlen(base64);
+                    size_t decodedBinarySize = base64Size - base64Size / 4;
+
+                    if (base64Size >= 2) {
+                        decodedBinarySize -= base64[base64Size - 1] == '=';
+                        decodedBinarySize -= base64[base64Size - 2] == '=';
+                    }
+
+                    void *imageData = nullptr;
+                    cgltf_options options = {};
+                    if (cgltf_load_buffer_base64(&options, decodedBinarySize, base64, &imageData) !=
+                        cgltf_result_success) {
+                        std::cerr << "Failed to parse base64 image uri" << std::endl;
+                        return;
+                    }
+
+                    unsigned char *stbData = stbi_load_from_memory(
+                        static_cast<const unsigned char *>(imageData), decodedBinarySize, &width, &height,
+                        &numChannels, 4);
+
+                    VkExtent3D imageExtent;
+                    imageExtent.width = width;
+                    imageExtent.height = height;
+                    imageExtent.depth = 1;
+
+                    newImage = scene.vulkanContext->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                                                                VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                                false);
+
+                    scene.images.push_back(newImage);
+
+                    stbi_image_free(stbData);
+                    free(imageData);
+                } else {
+                    std::cerr << "Invalid embedded image uri" << std::endl;
+                    //todo: use default missing texture
+                    return;
+                }
+            } else {
+                // todo: load image from file and from buffer
+                std::filesystem::path imageFile = directory / uri;
+                unsigned char *stbData = stbi_load(imageFile.c_str(), &width, &height, &numChannels, 4);
+                if (stbData) {
+                    VkExtent3D imageExtent;
+                    imageExtent.width = width;
+                    imageExtent.height = height;
+                    imageExtent.depth = 1;
+
+                    newImage = scene.vulkanContext->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                                                                VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                                false);
+
+                    scene.images.push_back(newImage);
+
+                    stbi_image_free(stbData);
+                } else {
+                    std::cerr << "Failed to read image file " << imageFile << std::endl;
+                }
+            }
+        }
+    }
+}
+
+void parseMesh(const cgltf_data *data, Scene &scene) {
     for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
         Mesh newMesh = {};
 
@@ -54,33 +132,83 @@ void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
         for (size_t primitive_i = 0; primitive_i < gltfMesh->primitives_count; primitive_i++) {
             const cgltf_primitive *gltfPrimitive = &gltfMesh->primitives[primitive_i];
 
-            uint32_t indexStart = static_cast<uint32_t>(indexBuffer.size());
-            uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
+            uint32_t indexStart = static_cast<uint32_t>(scene.indexBuffer.size());
+            uint32_t vertexStart = static_cast<uint32_t>(scene.vertexBuffer.size());
             uint32_t indexCount = 0;
             uint32_t vertexCount = 0;
             bool hasIndices = gltfPrimitive->indices != nullptr;
 
+            const cgltf_accessor *positionAccessor = nullptr;
+            const cgltf_buffer_view *positionBufferView = nullptr;
+            const std::byte *positionBuffer = nullptr;
+
+            const cgltf_accessor *normalAccessor = nullptr;
+            const cgltf_buffer_view *normalBufferView = nullptr;
+            const std::byte *normalBuffer = nullptr;
+
+            const cgltf_accessor *uvAccessor = nullptr;
+            const cgltf_buffer_view *uvBufferView = nullptr;
+            const std::byte *uvBuffer = nullptr;
+
             for (size_t attr_i = 0; attr_i < gltfPrimitive->attributes_count; attr_i++) {
                 const cgltf_attribute *gltfAttribute = &gltfPrimitive->attributes[attr_i];
-                const cgltf_accessor *gltfAccessor = gltfAttribute->data;
-
-                if (strcmp(gltfAttribute->name, "POSITION") == 0) {
-                    vertexCount = gltfAccessor->count;
-                    const cgltf_buffer_view *posBufferView = gltfAccessor->buffer_view;
-                    const std::byte *posBuffer = static_cast<const std::byte *>(posBufferView->buffer->data);
-
-                    for (size_t pos_i = 0; pos_i < gltfAccessor->count; pos_i++) {
-                        Vertex vertex = {};
-                        size_t bufOffset = gltfAccessor->offset + posBufferView->offset +
-                                          pos_i * gltfAccessor->stride;
-
-                        vertex.position = glm::make_vec3(
-                            reinterpret_cast<const float *>(&posBuffer[bufOffset])
-                        );
-
-                        vertexBuffer.push_back(vertex);
+                switch (gltfAttribute->type) {
+                    case cgltf_attribute_type_position: {
+                        positionAccessor = gltfAttribute->data;
+                        positionBufferView = positionAccessor->buffer_view;
+                        vertexCount = positionAccessor->count;
+                        positionBuffer = static_cast<const std::byte *>(positionBufferView->buffer->data);
+                        break;
                     }
+                    case cgltf_attribute_type_normal: {
+                        normalAccessor = gltfAttribute->data;
+                        normalBufferView = normalAccessor->buffer_view;
+                        normalBuffer = static_cast<const std::byte *>(normalBufferView->buffer->data);
+                        break;
+                    }
+                    case cgltf_attribute_type_texcoord: {
+                        uvAccessor = gltfAttribute->data;
+                        uvBufferView = uvAccessor->buffer_view;
+                        uvBuffer = static_cast<const std::byte *>(uvBufferView->buffer->data);
+                        break;
+                    }
+                    default:
+                        break;
                 }
+            }
+
+            assert(positionBuffer &&
+                (!normalBuffer || normalAccessor->count == positionAccessor->count) &&
+                (!uvBuffer || uvAccessor->count == positionAccessor->count)
+            );
+
+            for (size_t vertex_i = 0; vertex_i < vertexCount; vertex_i++) {
+                Vertex vertex = {};
+
+                // todo: support types other than floats for textures?
+                if (positionAccessor && positionBufferView) {
+                    size_t positionOffset = positionAccessor->offset + positionBufferView->offset +
+                                            vertex_i * positionAccessor->stride;
+                    vertex.position = glm::make_vec3(reinterpret_cast<const float *>(&positionBuffer[positionOffset]));
+                } else {
+                    std::cerr << "Mesh primitive has no vertices" << std::endl;
+                }
+
+                if (normalAccessor && normalBufferView) {
+                    size_t normalOffset = normalAccessor->offset + normalBufferView->offset +
+                                          vertex_i * normalAccessor->stride;
+                    vertex.normal = glm::make_vec3(reinterpret_cast<const float *>(&normalBuffer[normalOffset]));
+                }
+
+                if (uvAccessor && uvBufferView) {
+                    size_t uvOffset = uvAccessor->offset + uvBufferView->offset +
+                                      vertex_i * uvAccessor->stride;
+                    glm::vec2 uv = glm::make_vec2(reinterpret_cast<const float *>(&uvBuffer[uvOffset]));
+                    vertex.uv_x = uv.x;
+                    vertex.uv_y = uv.y;
+                }
+
+                scene.vertexBuffer.push_back(vertex);
             }
 
             if (hasIndices) {
@@ -95,21 +223,21 @@ void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
                     case 4: {
                         const uint32_t *buffer = reinterpret_cast<const uint32_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            indexBuffer.push_back(buffer[i] + vertexStart);
+                            scene.indexBuffer.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
                     case 2: {
                         const uint16_t *buffer = reinterpret_cast<const uint16_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            indexBuffer.push_back(buffer[i] + vertexStart);
+                            scene.indexBuffer.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
                     case 1: {
                         const uint8_t *buffer = reinterpret_cast<const uint8_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            indexBuffer.push_back(buffer[i] + vertexStart);
+                            scene.indexBuffer.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
@@ -121,11 +249,12 @@ void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh> > &meshes,
 
             newMesh.meshPrimitives.emplace_back(indexStart, vertexStart, indexCount, vertexCount, hasIndices);
         }
-        meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
+        scene.meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
     }
+    scene.buffers = scene.vulkanContext->uploadMesh(scene.indexBuffer, scene.vertexBuffer);
 }
 
-void parseNodes(cgltf_data *data, Scene &scene) {
+void parseNodes(const cgltf_data *data, Scene &scene) {
     for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
         cgltf_node gltfNode = data->nodes[node_i];
         std::shared_ptr<Node> newNode = std::make_shared<Node>();
@@ -170,7 +299,7 @@ void parseNodes(cgltf_data *data, Scene &scene) {
         }
     }
 
-    for (auto& node : scene.nodes) {
+    for (auto &node: scene.nodes) {
         if (node->parent.lock() == nullptr) {
             scene.topLevelNodes.push_back(node);
             node->updateWorldTransform(glm::mat4(1.f));
@@ -182,7 +311,7 @@ void Node::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
     if (mesh != nullptr) {
         glm::mat4 nodeMatrix = topMatrix * worldTransform;
 
-        for (auto& meshPrimitive : mesh->meshPrimitives) {
+        for (auto &meshPrimitive: mesh->meshPrimitives) {
             RenderObject renderObject = {};
             renderObject.indexStart = meshPrimitive.indexStart;
             renderObject.vertexStart = meshPrimitive.vertexStart;
@@ -196,14 +325,21 @@ void Node::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
         }
     }
 
-    for (auto& child : children) {
+    for (auto &child: children) {
         child->draw(topMatrix, ctx);
     }
 }
 
 void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-    for (auto& node : topLevelNodes) {
+    for (auto &node: topLevelNodes) {
         node->draw(topMatrix, ctx);
     }
 }
 
+void Scene::clear() {
+    vulkanContext->freeMesh(buffers);
+
+    for (auto &image: images) {
+        vulkanContext->destroyImage(image);
+    }
+}

@@ -12,7 +12,7 @@ struct DrawContext;
 struct Scene;
 
 class IRenderable {
-    virtual void draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
+    virtual void draw(const glm::mat4 &topMatrix, DrawContext &ctx) = 0;
 };
 
 struct MeshPrimitive {
@@ -48,37 +48,46 @@ struct DrawContext {
 struct Node : public IRenderable {
     std::string name;
     std::weak_ptr<Node> parent;
-    std::vector<std::shared_ptr<Node>> children;
+    std::vector<std::shared_ptr<Node> > children;
 
     std::shared_ptr<Mesh> mesh;
 
     glm::mat4 localTransform = glm::mat4(1.f);
     glm::mat4 worldTransform = glm::mat4(1.f);
 
-    void updateWorldTransform(const glm::mat4& parentMatrix) {
+    void updateWorldTransform(const glm::mat4 &parentMatrix) {
         worldTransform = parentMatrix * localTransform;
-        for (auto& child : children) {
+        for (auto &child: children) {
             child->updateWorldTransform(worldTransform);
         }
     }
 
-    void draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
+    void draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
 };
 
 struct Scene : public IRenderable {
+    std::vector<VulkanImage> images;
     std::vector<std::shared_ptr<Mesh> > meshes;
 
     std::vector<std::shared_ptr<Node> > nodes;
-    std::vector<std::shared_ptr<Node>> topLevelNodes;
+    std::vector<std::shared_ptr<Node> > topLevelNodes;
 
     GPUMeshBuffers buffers;
 
+    VulkanContext *vulkanContext;
+
+    std::vector<uint32_t> indexBuffer;
+    std::vector<Vertex> vertexBuffer;
+
     void draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
+
+    void clear();
 };
 
 std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath);
 
-void parseMesh(cgltf_data *data, std::vector<std::shared_ptr<Mesh>> &meshes,
-               std::vector<uint32_t> &indexBuffer, std::vector<Vertex> &vertexBuffer);
+void parseImages(const cgltf_data *data, Scene &scene, std::filesystem::path gltfPath);
 
-void parseNodes(cgltf_data *data, Scene& scene);
+void parseMesh(const cgltf_data *data, Scene &scene);
+
+void parseNodes(const cgltf_data *data, Scene &scene);

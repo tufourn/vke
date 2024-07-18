@@ -31,7 +31,7 @@ void Camera::processMouseMovement(float xOffset, float yOffset) {
     yOffset *= sensitivity;
 
     yaw -= xOffset;
-    pitch += yOffset;
+    pitch -= yOffset;
 
     if (pitch >= 90.f) {
         pitch = 90.f;
@@ -73,10 +73,10 @@ void Camera::processKeypress(int key, int action) {
                 velocity.x = 1;
                 break;
             case GLFW_KEY_SPACE:
-                velocity.y = -1;
+                velocity.y = 1;
                 break;
             case GLFW_KEY_LEFT_CONTROL:
-                velocity.y = 1;
+                velocity.y = -1;
                 break;
             default:
                 break;

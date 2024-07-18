@@ -31,6 +31,7 @@ include_directories(include
         external/glfw/include
         external/glm/
         external/cgltf/
+        external/stb/
 )
 
 # Sources
