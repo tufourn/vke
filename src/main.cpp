@@ -153,7 +153,15 @@ void drawGeometry(VkCommandBuffer cmd) {
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-    VkRenderingInfo renderInfo = VkInit::renderingInfo(vk.windowExtent, &colorAttachment, nullptr);
+    VkRenderingAttachmentInfo depthAttachment = {};
+    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAttachment.imageView = vk.depthImage.imageView;
+    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.clearValue.depthStencil.depth = 1.f;
+
+    VkRenderingInfo renderInfo = VkInit::renderingInfo(vk.windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState.trianglePipeline);
@@ -268,12 +276,13 @@ void setupVulkan() {
             .setShaders(triangleVertShader, triangleFragShader)
             .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .setPolygonMode(VK_POLYGON_MODE_FILL)
-            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+            .setCullMode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .setMultisamplingNone()
             .disableBlending()
-            .disableDepthTest()
+            // .disableDepthTest()
+            .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL)
             .setColorAttachmentFormat(vk.drawImage.imageFormat)
-            .setDepthAttachmentFormat(VK_FORMAT_UNDEFINED);
+            .setDepthAttachmentFormat(vk.depthImage.imageFormat);
 
     vkState.trianglePipeline = trianglePipelineBuilder.build(vk.device);
 
@@ -282,6 +291,7 @@ void setupVulkan() {
 
     // sc = loadGLTF(&vk, "assets/models/box/BoxTextured.gltf");
     sc = loadGLTF(&vk, "assets/models/milk_truck/CesiumMilkTruck.gltf");
+    // sc = loadGLTF(&vk, "assets/models/duck/Duck.gltf");
 }
 
 void terminateVulkan() {

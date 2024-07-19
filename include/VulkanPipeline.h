@@ -30,6 +30,8 @@ public:
 
     PipelineBuilder &disableDepthTest();
 
+    PipelineBuilder &enableDepthTest(VkBool32 depthWriteEnable, VkCompareOp compareOp);
+
 private:
     void clear();
 

@@ -22,8 +22,8 @@ std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath)
                 " Error: " << result << std::endl;
         return {};
     }
-
-    if (cgltf_load_buffers(&options, data, gltfPath.string().c_str()) != cgltf_result_success) {
+    result = cgltf_load_buffers(&options, data, gltfPath.string().c_str());
+    if (result != cgltf_result_success) {
         std::cerr << "Failed to load buffers from file: " << gltfPath <<
                 " Error: " << result << std::endl;
         return {};
