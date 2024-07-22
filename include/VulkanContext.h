@@ -55,6 +55,8 @@ struct VulkanContext {
     VulkanImage drawImage = {};
     VulkanImage depthImage = {};
 
+    VulkanImage defaultTextureImage = {};
+
     std::array<FrameData, MAX_CONCURRENT_FRAMES> frames;
 
     void init();
@@ -81,7 +83,8 @@ struct VulkanContext {
     void immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&function) const;
 
     GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
-    void freeMesh(GPUMeshBuffers& meshBuffers);
+
+    void freeMesh(GPUMeshBuffers &meshBuffers);
 
 private:
     VkFence m_immediateFence = VK_NULL_HANDLE;
@@ -109,4 +112,6 @@ private:
     void initSyncStructures();
 
     void initVmaAllocator();
+
+    void initDefaultData();
 };

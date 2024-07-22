@@ -11,37 +11,150 @@
 #include <iostream>
 #include <Utils.h>
 
-std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath) {
-    std::filesystem::path gltfPath = std::filesystem::current_path() / filePath;
+void parseTextures(const cgltf_data *data, Scene &scene) {
+    for (size_t texture_i = 0; texture_i < data->textures_count; texture_i++) {
+        const cgltf_texture *gltfTexture = &data->textures[texture_i];
+        Texture texture = {};
+        if (gltfTexture->name) {
+            texture.name = gltfTexture->name;
+        }
+
+        size_t imageIndex = gltfTexture->image - data->images;
+        if (scene.images[imageIndex].has_value()) {
+            texture.image = scene.images[imageIndex].value();
+        } else {
+            texture.image = scene.m_vkCtx->defaultTextureImage;
+        }
+    }
+}
+
+void parseMaterials(const cgltf_data *data, Scene &scene) {
+    for (size_t material_i = 0; material_i < data->materials_count; material_i++) {
+        const cgltf_material *gltfMaterial = &data->materials[material_i];
+        if (gltfMaterial->has_pbr_metallic_roughness) {
+            const cgltf_pbr_metallic_roughness *gltfMetallicRoughness = &gltfMaterial->pbr_metallic_roughness;
+            GLTFMetallicRoughness::materialData materialData = {};
+            materialData.baseColorFactor = glm::make_vec4(gltfMetallicRoughness->base_color_factor);
+            materialData.metallicFactor = gltfMetallicRoughness->metallic_factor;
+            materialData.roughnessFactor = gltfMetallicRoughness->roughness_factor;
+        }
+    }
+}
+
+VkFilter extractGltfMagFilter(int gltfMagFilter) {
+    switch (gltfMagFilter) {
+        case 9728:
+            return VK_FILTER_NEAREST;
+        case 9729:
+            return VK_FILTER_LINEAR;
+        default:
+            return VK_FILTER_LINEAR;
+    }
+}
+
+VkFilter extractGltfMinFilter(int gltfMinFilter) {
+    switch (gltfMinFilter) {
+        case 9728:
+            return VK_FILTER_NEAREST;
+        case 9729:
+            return VK_FILTER_LINEAR;
+        case 9984:
+            return VK_FILTER_NEAREST;
+        case 9985:
+            return VK_FILTER_NEAREST;
+        case 9986:
+            return VK_FILTER_LINEAR;
+        case 9987:
+            return VK_FILTER_LINEAR;
+        default:
+            return VK_FILTER_LINEAR;
+    }
+}
+
+VkSamplerAddressMode extractGltfWrapMode(int gltfWrap) {
+    switch (gltfWrap) {
+        case 33071:
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        case 33648:
+            return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        case 10497:
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        default:
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    }
+}
+
+void Node::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
+    if (mesh != nullptr) {
+        glm::mat4 nodeMatrix = topMatrix * worldTransform;
+
+        for (auto &meshPrimitive: mesh->meshPrimitives) {
+            RenderObject renderObject = {};
+            renderObject.indexStart = meshPrimitive.indexStart;
+            renderObject.vertexStart = meshPrimitive.vertexStart;
+            renderObject.indexCount = meshPrimitive.indexCount;
+            renderObject.vertexCount = meshPrimitive.vertexCount;
+            renderObject.hasIndices = meshPrimitive.hasIndices;
+
+            renderObject.transform = nodeMatrix;
+
+            ctx.renderObjects.push_back(renderObject);
+        }
+    }
+
+    for (auto &child: children) {
+        child->draw(topMatrix, ctx);
+    }
+}
+
+Scene::Scene(VulkanContext* vkCtx) : m_vkCtx(vkCtx) {
+
+}
+
+void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
+    for (auto &node: topLevelNodes) {
+        node->draw(topMatrix, ctx);
+    }
+}
+
+void Scene::clear() {
+    m_vkCtx->freeMesh(buffers);
+    for (auto &image: images) {
+        if (image.has_value()) {
+            m_vkCtx->destroyImage(image.value());
+        }
+    }
+}
+
+void Scene::load(std::filesystem::path filePath) {
+    path = std::filesystem::current_path() / filePath;
+
     cgltf_options options = {};
     cgltf_data *data = nullptr;
 
-    cgltf_result result = cgltf_parse_file(&options, gltfPath.string().c_str(), &data);
+    cgltf_result result = cgltf_parse_file(&options, path.string().c_str(), &data);
     if (result != cgltf_result_success) {
-        std::cerr << "Failed to load GLTF file: " << gltfPath <<
+        std::cerr << "Failed to load GLTF file: " << path <<
                 " Error: " << result << std::endl;
-        return {};
+        return;
     }
-    result = cgltf_load_buffers(&options, data, gltfPath.string().c_str());
+    result = cgltf_load_buffers(&options, data, path.string().c_str());
     if (result != cgltf_result_success) {
-        std::cerr << "Failed to load buffers from file: " << gltfPath <<
+        std::cerr << "Failed to load buffers from file: " << path <<
                 " Error: " << result << std::endl;
-        return {};
+        return;
     }
 
-    Scene scene;
-    scene.vulkanContext = vk;
-
-    parseImages(data, scene, gltfPath);
-    parseMesh(data, scene);
-    parseNodes(data, scene);
+    parseImages(data);
+    parseMesh(data);
+    parseNodes(data);
 
     cgltf_free(data);
-    return scene;
+    loaded = true;
 }
 
-void parseImages(const cgltf_data *data, Scene &scene, std::filesystem::path gltfPath) {
-    std::filesystem::path directory = gltfPath.parent_path();
+void Scene::parseImages(const cgltf_data *data) {
+    std::filesystem::path directory = path.parent_path();
 
     for (size_t image_i = 0; image_i < data->images_count; image_i++) {
         const cgltf_image *gltfImage = &data->images[image_i];
@@ -81,11 +194,11 @@ void parseImages(const cgltf_data *data, Scene &scene, std::filesystem::path glt
                     imageExtent.height = height;
                     imageExtent.depth = 1;
 
-                    newImage = scene.vulkanContext->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                    newImage = m_vkCtx->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                                 VK_IMAGE_USAGE_SAMPLED_BIT,
                                                                 false);
 
-                    scene.images.push_back(newImage);
+                    images.emplace_back(newImage);
 
                     stbi_image_free(stbData);
                     free(imageData);
@@ -104,23 +217,24 @@ void parseImages(const cgltf_data *data, Scene &scene, std::filesystem::path glt
                     imageExtent.height = height;
                     imageExtent.depth = 1;
 
-                    newImage = scene.vulkanContext->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                    newImage = m_vkCtx->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                                 VK_IMAGE_USAGE_SAMPLED_BIT,
                                                                 false);
 
-                    scene.images.push_back(newImage);
+                    images.emplace_back(newImage);
 
                     stbi_image_free(stbData);
                 } else {
                     std::cerr << "Failed to read image file " << imageFile << std::endl;
+                    images.emplace_back();
                 }
             }
         }
     }
 }
 
-void parseMesh(const cgltf_data *data, Scene &scene) {
-    for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
+void Scene::parseMesh(const cgltf_data *data) {
+        for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
         Mesh newMesh = {};
 
         const cgltf_mesh *gltfMesh = &data->meshes[mesh_i];
@@ -132,8 +246,8 @@ void parseMesh(const cgltf_data *data, Scene &scene) {
         for (size_t primitive_i = 0; primitive_i < gltfMesh->primitives_count; primitive_i++) {
             const cgltf_primitive *gltfPrimitive = &gltfMesh->primitives[primitive_i];
 
-            uint32_t indexStart = static_cast<uint32_t>(scene.indexBuffer.size());
-            uint32_t vertexStart = static_cast<uint32_t>(scene.vertexBuffer.size());
+            uint32_t indexStart = static_cast<uint32_t>(indexBuffer.size());
+            uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
             uint32_t indexCount = 0;
             uint32_t vertexCount = 0;
             bool hasIndices = gltfPrimitive->indices != nullptr;
@@ -208,7 +322,7 @@ void parseMesh(const cgltf_data *data, Scene &scene) {
                     vertex.uv_y = uv.y;
                 }
 
-                scene.vertexBuffer.push_back(vertex);
+                vertexBuffer.push_back(vertex);
             }
 
             if (hasIndices) {
@@ -223,21 +337,21 @@ void parseMesh(const cgltf_data *data, Scene &scene) {
                     case 4: {
                         const uint32_t *buffer = reinterpret_cast<const uint32_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            scene.indexBuffer.push_back(buffer[i] + vertexStart);
+                            indexBuffer.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
                     case 2: {
                         const uint16_t *buffer = reinterpret_cast<const uint16_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            scene.indexBuffer.push_back(buffer[i] + vertexStart);
+                            indexBuffer.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
                     case 1: {
                         const uint8_t *buffer = reinterpret_cast<const uint8_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            scene.indexBuffer.push_back(buffer[i] + vertexStart);
+                            indexBuffer.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
@@ -249,13 +363,13 @@ void parseMesh(const cgltf_data *data, Scene &scene) {
 
             newMesh.meshPrimitives.emplace_back(indexStart, vertexStart, indexCount, vertexCount, hasIndices);
         }
-        scene.meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
+        meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
     }
-    scene.buffers = scene.vulkanContext->uploadMesh(scene.indexBuffer, scene.vertexBuffer);
+    buffers = m_vkCtx->uploadMesh(indexBuffer, vertexBuffer);
 }
 
-void parseNodes(const cgltf_data *data, Scene &scene) {
-    for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
+void Scene::parseNodes(const cgltf_data *data) {
+        for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
         cgltf_node gltfNode = data->nodes[node_i];
         std::shared_ptr<Node> newNode = std::make_shared<Node>();
 
@@ -264,7 +378,7 @@ void parseNodes(const cgltf_data *data, Scene &scene) {
         }
 
         if (gltfNode.mesh != nullptr) {
-            newNode->mesh = scene.meshes[gltfNode.mesh - data->meshes];
+            newNode->mesh = meshes[gltfNode.mesh - data->meshes];
         }
 
         glm::mat4 translation = glm::translate(glm::mat4(1.f), {
@@ -286,7 +400,7 @@ void parseNodes(const cgltf_data *data, Scene &scene) {
 
         newNode->localTransform = translation * glm::toMat4(rotation) * scale;
 
-        scene.nodes.emplace_back(newNode);
+        nodes.emplace_back(newNode);
     }
 
     for (size_t parentNode_i = 0; parentNode_i < data->nodes_count; parentNode_i++) {
@@ -294,52 +408,15 @@ void parseNodes(const cgltf_data *data, Scene &scene) {
 
         for (size_t child_i = 0; child_i < gltfParentNode.children_count; child_i++) {
             size_t childNode_i = gltfParentNode.children[child_i] - data->nodes;
-            scene.nodes[parentNode_i]->children.push_back(scene.nodes[childNode_i]);
-            scene.nodes[childNode_i]->parent = scene.nodes[parentNode_i];
+            nodes[parentNode_i]->children.push_back(nodes[childNode_i]);
+            nodes[childNode_i]->parent = nodes[parentNode_i];
         }
     }
 
-    for (auto &node: scene.nodes) {
+    for (auto &node: nodes) {
         if (node->parent.lock() == nullptr) {
-            scene.topLevelNodes.push_back(node);
+            topLevelNodes.push_back(node);
             node->updateWorldTransform(glm::mat4(1.f));
         }
-    }
-}
-
-void Node::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-    if (mesh != nullptr) {
-        glm::mat4 nodeMatrix = topMatrix * worldTransform;
-
-        for (auto &meshPrimitive: mesh->meshPrimitives) {
-            RenderObject renderObject = {};
-            renderObject.indexStart = meshPrimitive.indexStart;
-            renderObject.vertexStart = meshPrimitive.vertexStart;
-            renderObject.indexCount = meshPrimitive.indexCount;
-            renderObject.vertexCount = meshPrimitive.vertexCount;
-            renderObject.hasIndices = meshPrimitive.hasIndices;
-
-            renderObject.transform = nodeMatrix;
-
-            ctx.renderObjects.push_back(renderObject);
-        }
-    }
-
-    for (auto &child: children) {
-        child->draw(topMatrix, ctx);
-    }
-}
-
-void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-    for (auto &node: topLevelNodes) {
-        node->draw(topMatrix, ctx);
-    }
-}
-
-void Scene::clear() {
-    vulkanContext->freeMesh(buffers);
-
-    for (auto &image: images) {
-        vulkanContext->destroyImage(image);
     }
 }

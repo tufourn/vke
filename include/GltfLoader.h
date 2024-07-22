@@ -15,6 +15,30 @@ class IRenderable {
     virtual void draw(const glm::mat4 &topMatrix, DrawContext &ctx) = 0;
 };
 
+struct Texture {
+    std::string name;
+    VulkanImage image;
+    VkSampler sampler;
+};
+
+struct MaterialPipeline {
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+};
+
+struct MaterialInstance {
+    MaterialPipeline *pipeline;
+    VkDescriptorSet materialSet;
+};
+
+struct GLTFMetallicRoughness {
+    struct materialData {
+        glm::vec4 baseColorFactor = {1.f, 1.f, 1.f, 1.f};
+        float metallicFactor = 1.f;
+        float roughnessFactor = 1.f;
+    };
+};
+
 struct MeshPrimitive {
     uint32_t indexStart;
     uint32_t vertexStart;
@@ -66,15 +90,23 @@ struct Node : public IRenderable {
 };
 
 struct Scene : public IRenderable {
-    std::vector<VulkanImage> images;
+public:
+    Scene(VulkanContext *vkCtx);
+
+    std::filesystem::path path;
+
+    VulkanContext *m_vkCtx;
+    bool loaded = false;
+
+    std::vector<std::optional<VulkanImage> > images;
+    std::vector<std::shared_ptr<Texture> > textures;
+    std::vector<std::shared_ptr<MaterialInstance> > materials;
     std::vector<std::shared_ptr<Mesh> > meshes;
 
     std::vector<std::shared_ptr<Node> > nodes;
     std::vector<std::shared_ptr<Node> > topLevelNodes;
 
-    GPUMeshBuffers buffers;
-
-    VulkanContext *vulkanContext;
+    GPUMeshBuffers buffers = {};
 
     std::vector<uint32_t> indexBuffer;
     std::vector<Vertex> vertexBuffer;
@@ -82,12 +114,21 @@ struct Scene : public IRenderable {
     void draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
 
     void clear();
+
+    void load(std::filesystem::path filePath);
+
+private:
+    void parseImages(const cgltf_data *data);
+    void parseMesh(const cgltf_data *data);
+    void parseNodes(const cgltf_data* data);
 };
 
-std::optional<Scene> loadGLTF(VulkanContext *vk, std::filesystem::path filePath);
+void parseTextures(const cgltf_data *data, Scene &scene);
 
-void parseImages(const cgltf_data *data, Scene &scene, std::filesystem::path gltfPath);
+void parseMaterials(const cgltf_data *data, Scene &scene);
 
-void parseMesh(const cgltf_data *data, Scene &scene);
+static VkFilter extractGltfMagFilter(int gltfMagFilter);
 
-void parseNodes(const cgltf_data *data, Scene &scene);
+static VkFilter extractGltfMinFilter(int gltfMinFilter);
+
+static VkSamplerAddressMode extractGltfWrapMode(int gltfWrap);
