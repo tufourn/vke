@@ -345,16 +345,13 @@ GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<
                                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                               VMA_ALLOCATION_CREATE_MAPPED_BIT |
                                               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-    void *data = stagingBuffer.allocation->GetMappedData();
+    void *data = stagingBuffer.info.pMappedData;
 
     newSurface.vertexBuffer = createBuffer(vertexBufferSize,
                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                            VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    VkBufferDeviceAddressInfo deviceAddressInfo = {};
-    deviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    deviceAddressInfo.buffer = newSurface.vertexBuffer.buffer;
-    newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAddressInfo);
+    newSurface.vertexBufferAddress = getBufferAddress(newSurface.vertexBuffer);
     memcpy(data, vertices.data(), vertexBufferSize);
 
     if (indexBufferSize != 0) {
@@ -391,6 +388,14 @@ GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<
 void VulkanContext::freeMesh(GPUMeshBuffers &meshBuffers) {
     vmaDestroyBuffer(allocator, meshBuffers.indexBuffer.buffer, meshBuffers.indexBuffer.allocation);
     vmaDestroyBuffer(allocator, meshBuffers.vertexBuffer.buffer, meshBuffers.vertexBuffer.allocation);
+}
+
+VkDeviceAddress VulkanContext::getBufferAddress(const VulkanBuffer &buffer) {
+    VkBufferDeviceAddressInfo deviceAddressInfo = {};
+    deviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    deviceAddressInfo.buffer = buffer.buffer;
+
+    return vkGetBufferDeviceAddress(device, &deviceAddressInfo);
 }
 
 VulkanImage VulkanContext::createImage(const void *data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,

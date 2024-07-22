@@ -3,11 +3,8 @@
 #define VK_NO_PROTOTYPES
 
 #include <volk.h>
-#include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
-
-#include <memory>
 
 struct VulkanFeatures {
     bool dynamicRendering = true;

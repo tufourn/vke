@@ -86,6 +86,8 @@ struct VulkanContext {
 
     void freeMesh(GPUMeshBuffers &meshBuffers);
 
+    VkDeviceAddress getBufferAddress(const VulkanBuffer& buffer);
+
 private:
     VkFence m_immediateFence = VK_NULL_HANDLE;
     VkCommandBuffer m_immediateCommandBuffer = VK_NULL_HANDLE;

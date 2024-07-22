@@ -3,6 +3,7 @@
 #define CGLTF_IMPLEMENTATION
 #define GLM_ENABLE_EXPERIMENTAL
 #define STB_IMAGE_IMPLEMENTATION
+
 #include <cgltf.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -84,41 +85,12 @@ VkSamplerAddressMode extractGltfWrapMode(int gltfWrap) {
     }
 }
 
-void Node::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-    if (mesh != nullptr) {
-        glm::mat4 nodeMatrix = topMatrix * worldTransform;
-
-        for (auto &meshPrimitive: mesh->meshPrimitives) {
-            RenderObject renderObject = {};
-            renderObject.indexStart = meshPrimitive.indexStart;
-            renderObject.vertexStart = meshPrimitive.vertexStart;
-            renderObject.indexCount = meshPrimitive.indexCount;
-            renderObject.vertexCount = meshPrimitive.vertexCount;
-            renderObject.hasIndices = meshPrimitive.hasIndices;
-
-            renderObject.transform = nodeMatrix;
-
-            ctx.renderObjects.push_back(renderObject);
-        }
-    }
-
-    for (auto &child: children) {
-        child->draw(topMatrix, ctx);
-    }
-}
-
 Scene::Scene(VulkanContext* vkCtx) : m_vkCtx(vkCtx) {
 
 }
 
-void Scene::draw(const glm::mat4 &topMatrix, DrawContext &ctx) {
-    for (auto &node: topLevelNodes) {
-        node->draw(topMatrix, ctx);
-    }
-}
 
 void Scene::clear() {
-    m_vkCtx->freeMesh(buffers);
     for (auto &image: images) {
         if (image.has_value()) {
             m_vkCtx->destroyImage(image.value());
@@ -365,7 +337,6 @@ void Scene::parseMesh(const cgltf_data *data) {
         }
         meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
     }
-    buffers = m_vkCtx->uploadMesh(indexBuffer, vertexBuffer);
 }
 
 void Scene::parseNodes(const cgltf_data *data) {
@@ -416,7 +387,6 @@ void Scene::parseNodes(const cgltf_data *data) {
     for (auto &node: nodes) {
         if (node->parent.lock() == nullptr) {
             topLevelNodes.push_back(node);
-            node->updateWorldTransform(glm::mat4(1.f));
         }
     }
 }

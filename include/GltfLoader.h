@@ -8,13 +8,6 @@
 #include "VulkanContext.h"
 #include "VulkanTypes.h"
 
-struct DrawContext;
-struct Scene;
-
-class IRenderable {
-    virtual void draw(const glm::mat4 &topMatrix, DrawContext &ctx) = 0;
-};
-
 struct Texture {
     std::string name;
     VulkanImage image;
@@ -62,14 +55,7 @@ struct RenderObject {
     glm::mat4 transform;
 };
 
-struct DrawContext {
-    std::vector<RenderObject> renderObjects;
-
-    VkBuffer indexBuffer;
-    VkDeviceAddress vertexBufferAddress;
-};
-
-struct Node : public IRenderable {
+struct Node {
     std::string name;
     std::weak_ptr<Node> parent;
     std::vector<std::shared_ptr<Node> > children;
@@ -78,18 +64,9 @@ struct Node : public IRenderable {
 
     glm::mat4 localTransform = glm::mat4(1.f);
     glm::mat4 worldTransform = glm::mat4(1.f);
-
-    void updateWorldTransform(const glm::mat4 &parentMatrix) {
-        worldTransform = parentMatrix * localTransform;
-        for (auto &child: children) {
-            child->updateWorldTransform(worldTransform);
-        }
-    }
-
-    void draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
 };
 
-struct Scene : public IRenderable {
+struct Scene {
 public:
     Scene(VulkanContext *vkCtx);
 
@@ -111,18 +88,19 @@ public:
     std::vector<uint32_t> indexBuffer;
     std::vector<Vertex> vertexBuffer;
 
-    void draw(const glm::mat4 &topMatrix, DrawContext &ctx) override;
-
     void clear();
 
     void load(std::filesystem::path filePath);
 
 private:
     void parseImages(const cgltf_data *data);
+
     void parseMesh(const cgltf_data *data);
-    void parseNodes(const cgltf_data* data);
+
+    void parseNodes(const cgltf_data *data);
 };
 
+//todo
 void parseTextures(const cgltf_data *data, Scene &scene);
 
 void parseMaterials(const cgltf_data *data, Scene &scene);

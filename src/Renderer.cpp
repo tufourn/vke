@@ -3,6 +3,7 @@
 #include <VulkanInit.h>
 #include <VulkanPipeline.h>
 #include <VulkanUtils.h>
+#include <stack>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -120,6 +121,108 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
     m_vertexBuffer.insert(m_vertexBuffer.end(), scene.vertexBuffer.begin(), scene.vertexBuffer.end());
 
     scenes.emplace_back(scene);
+
+    createDrawDatas();
+    createBuffers();
+}
+
+void Renderer::createBuffers() {
+    const size_t vertexBufferSize = m_vertexBuffer.size() * sizeof(Vertex);
+    const size_t indexBufferSize = m_indexBuffer.size() * sizeof(uint32_t);
+    const size_t transformBufferSize = m_transformBuffer.size() * sizeof(glm::mat4);
+
+    VulkanBuffer stagingBuffer = m_vk.createBuffer(vertexBufferSize + indexBufferSize + transformBufferSize,
+                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                   VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                   VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    void *data = stagingBuffer.info.pMappedData;
+
+    m_vulkanVertexBuffer = m_vk.createBuffer(vertexBufferSize,
+                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                             VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    memcpy(data, m_vertexBuffer.data(), vertexBufferSize);
+
+    if (indexBufferSize != 0) {
+        m_vulkanIndexBuffer = m_vk.createBuffer(indexBufferSize,
+                                                VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, m_indexBuffer.data(), indexBufferSize);
+    }
+
+    m_vulkanTransformBuffer = m_vk.createBuffer(transformBufferSize,
+                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize, m_transformBuffer.data(),
+           transformBufferSize);
+
+    m_vk.immediateSubmit([&](VkCommandBuffer cmd) {
+        VkBufferCopy vertexCopy = {0};
+        vertexCopy.dstOffset = 0;
+        vertexCopy.srcOffset = 0;
+        vertexCopy.size = vertexBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_vulkanVertexBuffer.buffer,
+                        1, &vertexCopy);
+
+        if (indexBufferSize != 0) {
+            VkBufferCopy indexCopy = {0};
+            indexCopy.dstOffset = 0;
+            indexCopy.srcOffset = vertexBufferSize;
+            indexCopy.size = indexBufferSize;
+            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_vulkanIndexBuffer.buffer,
+                            1, &indexCopy);
+        }
+
+        VkBufferCopy transformCopy = {0};
+        transformCopy.dstOffset = 0;
+        transformCopy.srcOffset = vertexBufferSize + indexBufferSize;
+        transformCopy.size = transformBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_vulkanTransformBuffer.buffer,
+                        1, &transformCopy);
+    });
+
+    m_vk.destroyBuffer(stagingBuffer);
+}
+
+void Renderer::createDrawDatas() {
+    for (const auto &scene: scenes) {
+        for (const auto &topLevelNode: scene.topLevelNodes) {
+            std::stack<std::shared_ptr<Node> > nodeStack;
+            nodeStack.push(topLevelNode);
+
+            while (!nodeStack.empty()) {
+                auto currentNode = nodeStack.top();
+                nodeStack.pop();
+
+                if (auto parentNode = currentNode->parent.lock()) {
+                    currentNode->worldTransform = parentNode->worldTransform * currentNode->localTransform;
+                } else {
+                    currentNode->worldTransform = currentNode->localTransform;
+                }
+
+                if (const auto &nodeMesh = currentNode->mesh) {
+                    for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
+                        DrawData drawData = {};
+                        //todo: support multiple scenes
+                        drawData.hasIndices = meshPrimitive.hasIndices;
+                        drawData.indexOffset = meshPrimitive.indexStart;
+                        drawData.vertexOffset = meshPrimitive.vertexStart;
+                        drawData.indexCount = meshPrimitive.indexCount;
+                        drawData.vertexCount = meshPrimitive.vertexCount;
+                        drawData.transformOffset = m_transformBuffer.size();
+
+                        drawDatas.emplace_back(drawData);
+                    }
+                    m_transformBuffer.emplace_back(currentNode->worldTransform);
+                }
+
+                for (const auto &child: currentNode->children) {
+                    nodeStack.push(child);
+                }
+            }
+        }
+    }
 }
 
 void Renderer::setupVulkan() {
@@ -174,7 +277,7 @@ void Renderer::setupVulkan() {
             .setShaders(triangleVertShader, triangleFragShader)
             .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .setPolygonMode(VK_POLYGON_MODE_FILL)
-            .setCullMode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .setMultisamplingNone()
             .disableBlending()
             // .disableDepthTest()
@@ -191,13 +294,19 @@ void Renderer::setupVulkan() {
 void Renderer::terminateVulkan() {
     vkDeviceWaitIdle(m_vk.device);
 
-    for (auto& scene : scenes) {
+    for (auto &scene: scenes) {
         scene.clear();
     }
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         m_vk.frames[i].frameDescriptors.destroyPools(m_vk.device);
     }
+
+    if (!m_indexBuffer.empty()) {
+        m_vk.destroyBuffer(m_vulkanIndexBuffer);
+    }
+    m_vk.destroyBuffer(m_vulkanVertexBuffer);
+    m_vk.destroyBuffer(m_vulkanTransformBuffer);
 
     vkDestroyDescriptorSetLayout(m_vk.device, singleImageDescriptorLayout, nullptr);
 
@@ -228,21 +337,21 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     VkRenderingInfo renderInfo = VkInit::renderingInfo(m_vk.windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
 
-     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
 
-     // bind texture
-     VkDescriptorSet imageSet = m_vk.frames[currentFrame].frameDescriptors
-             .allocate(m_vk.device, singleImageDescriptorLayout); {
-         DescriptorWriter writer;
-         writer.writeImage(0, m_vk.defaultTextureImage.imageView, defaultSamplerLinear,
-                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-         // writer.writeImage(0, sc.value().images[0].value().imageView, vkState.defaultSamplerLinear,
-         //                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-         writer.updateSet(m_vk.device, imageSet);
-     }
+    // bind texture
+    VkDescriptorSet imageSet = m_vk.frames[currentFrame].frameDescriptors
+            .allocate(m_vk.device, singleImageDescriptorLayout); {
+        DescriptorWriter writer;
+        writer.writeImage(0, m_vk.defaultTextureImage.imageView, defaultSamplerLinear,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        // writer.writeImage(0, sc.value().images[0].value().imageView, vkState.defaultSamplerLinear,
+        //                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.updateSet(m_vk.device, imageSet);
+    }
 
-     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipelineLayout,
-                             0, 1, &imageSet, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipelineLayout,
+                            0, 1, &imageSet, 0, nullptr);
 
     //set dynamic viewport and scissor
     VkViewport viewport = {};
@@ -266,25 +375,19 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
     projection[1][1] *= -1; // flip y
 
-    DrawContext ctx;
-    ctx.indexBuffer = scenes[0].buffers.indexBuffer.buffer;
-    ctx.vertexBufferAddress = scenes[0].buffers.vertexBufferAddress;
-
-    scenes[0].draw(glm::mat4(1.f), ctx);
-
     PushConstants pc;
 
-    for (auto &renderObject: ctx.renderObjects) {
-        pc.worldMatrix = projection * m_camera.getViewMatrix() * renderObject.transform;
-        pc.vertexBuffer = ctx.vertexBufferAddress;
+    for (const auto& drawData : drawDatas) {
+        pc.worldMatrix = projection * m_camera.getViewMatrix() * m_transformBuffer[drawData.transformOffset];
+        pc.vertexBuffer = m_vk.getBufferAddress(m_vulkanVertexBuffer);
         vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(PushConstants),
                            &pc);
-        if (renderObject.hasIndices) {
-            vkCmdBindIndexBuffer(cmd, ctx.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, renderObject.indexCount, 1, renderObject.indexStart, 0, 1);
+        if (drawData.hasIndices) {
+            vkCmdBindIndexBuffer(cmd, m_vulkanIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
         } else {
-            vkCmdDraw(cmd, renderObject.vertexCount, 1, renderObject.vertexStart, 0);
+            vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.indexOffset, 0);
         }
     }
 
