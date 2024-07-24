@@ -82,11 +82,7 @@ struct VulkanContext {
 
     void immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&function) const;
 
-    GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
-
-    void freeMesh(GPUMeshBuffers &meshBuffers);
-
-    VkDeviceAddress getBufferAddress(const VulkanBuffer& buffer);
+    VkDeviceAddress getBufferAddress(const VulkanBuffer& buffer) const;
 
 private:
     VkFence m_immediateFence = VK_NULL_HANDLE;

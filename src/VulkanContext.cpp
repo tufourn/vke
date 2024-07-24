@@ -335,62 +335,7 @@ void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&f
     VK_CHECK(vkWaitForFences(device, 1, &m_immediateFence, true, 1e9))
 }
 
-GPUMeshBuffers VulkanContext::uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices) {
-    const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
-    const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
-
-    GPUMeshBuffers newSurface = {};
-
-    VulkanBuffer stagingBuffer = createBuffer(vertexBufferSize + indexBufferSize,
-                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                              VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-    void *data = stagingBuffer.info.pMappedData;
-
-    newSurface.vertexBuffer = createBuffer(vertexBufferSize,
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                           VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    newSurface.vertexBufferAddress = getBufferAddress(newSurface.vertexBuffer);
-    memcpy(data, vertices.data(), vertexBufferSize);
-
-    if (indexBufferSize != 0) {
-        newSurface.indexBuffer = createBuffer(indexBufferSize,
-                                              VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                              VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, indices.data(), indexBufferSize);
-    }
-
-
-    immediateSubmit([&](VkCommandBuffer cmd) {
-        VkBufferCopy vertexCopy = {0};
-        vertexCopy.dstOffset = 0;
-        vertexCopy.srcOffset = 0;
-        vertexCopy.size = vertexBufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.vertexBuffer.buffer,
-                        1, &vertexCopy);
-
-        if (indexBufferSize != 0) {
-            VkBufferCopy indexCopy = {0};
-            indexCopy.dstOffset = 0;
-            indexCopy.srcOffset = vertexBufferSize;
-            indexCopy.size = indexBufferSize;
-            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer,
-                            1, &indexCopy);
-        }
-    });
-
-    destroyBuffer(stagingBuffer);
-
-    return newSurface;
-}
-
-void VulkanContext::freeMesh(GPUMeshBuffers &meshBuffers) {
-    vmaDestroyBuffer(allocator, meshBuffers.indexBuffer.buffer, meshBuffers.indexBuffer.allocation);
-    vmaDestroyBuffer(allocator, meshBuffers.vertexBuffer.buffer, meshBuffers.vertexBuffer.allocation);
-}
-
-VkDeviceAddress VulkanContext::getBufferAddress(const VulkanBuffer &buffer) {
+VkDeviceAddress VulkanContext::getBufferAddress(const VulkanBuffer &buffer) const {
     VkBufferDeviceAddressInfo deviceAddressInfo = {};
     deviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     deviceAddressInfo.buffer = buffer.buffer;

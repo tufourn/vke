@@ -231,7 +231,8 @@ void Renderer::setupVulkan() {
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
         };
 
         m_vk.frames[i].frameDescriptors = DescriptorAllocator();
@@ -252,11 +253,14 @@ void Renderer::setupVulkan() {
 
     DescriptorLayoutBuilder descriptorLayoutBuilder;
     descriptorLayoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    singleImageDescriptorLayout = descriptorLayoutBuilder.build(m_vk.device, VK_SHADER_STAGE_FRAGMENT_BIT);
+    descriptorLayoutBuilder.addBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    singleImageDescriptorLayout = descriptorLayoutBuilder.build(m_vk.device,
+                                                                VK_SHADER_STAGE_VERTEX_BIT |
+                                                                VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkPushConstantRange pushConstantsRange = {};
     pushConstantsRange.offset = 0;
-    pushConstantsRange.size = sizeof(PushConstants);
+    pushConstantsRange.size = sizeof(PushConstantsBindless);
     pushConstantsRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkInit::pipelineLayoutCreateInfo();
@@ -268,7 +272,7 @@ void Renderer::setupVulkan() {
     VK_CHECK(vkCreatePipelineLayout(m_vk.device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout))
 
     VkShaderModule triangleVertShader, triangleFragShader;
-    VK_CHECK(m_vk.createShaderModule("shaders/mesh_triangle.vert.spv", &triangleVertShader))
+    VK_CHECK(m_vk.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
     VK_CHECK(m_vk.createShaderModule("shaders/textured_triangle.frag.spv", &triangleFragShader))
 
     PipelineBuilder trianglePipelineBuilder;
@@ -339,20 +343,6 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
 
-    // bind texture
-    VkDescriptorSet imageSet = m_vk.frames[currentFrame].frameDescriptors
-            .allocate(m_vk.device, singleImageDescriptorLayout); {
-        DescriptorWriter writer;
-        writer.writeImage(0, m_vk.defaultTextureImage.imageView, defaultSamplerLinear,
-                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        // writer.writeImage(0, sc.value().images[0].value().imageView, vkState.defaultSamplerLinear,
-        //                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.updateSet(m_vk.device, imageSet);
-    }
-
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipelineLayout,
-                            0, 1, &imageSet, 0, nullptr);
-
     //set dynamic viewport and scissor
     VkViewport viewport = {};
     viewport.x = 0;
@@ -372,24 +362,57 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+    glm::mat4 view = m_camera.getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
     projection[1][1] *= -1; // flip y
 
-    PushConstants pc;
+    m_globalUniformData.view = view;
+    m_globalUniformData.proj = projection;
+    m_globalUniformData.projView = projection * view;
 
-    for (const auto& drawData : drawDatas) {
-        pc.worldMatrix = projection * m_camera.getViewMatrix() * m_transformBuffer[drawData.transformOffset];
-        pc.vertexBuffer = m_vk.getBufferAddress(m_vulkanVertexBuffer);
+    // uniform buffer for scene data
+    VulkanBuffer globalUniformBuffer = m_vk.createBuffer(sizeof(GlobalUniformData),
+                                                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                                         VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+
+    GlobalUniformData *globalUniformData = static_cast<GlobalUniformData *>(globalUniformBuffer.info.pMappedData);
+    *globalUniformData = m_globalUniformData;
+
+    // bind texture
+    VkDescriptorSet imageSet = m_vk.frames[currentFrame].frameDescriptors
+            .allocate(m_vk.device, singleImageDescriptorLayout); {
+        DescriptorWriter writer;
+        writer.writeImage(0, m_vk.defaultTextureImage.imageView, defaultSamplerLinear,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.writeBuffer(1, globalUniformBuffer.buffer, sizeof(GlobalUniformData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        // writer.writeImage(0, sc.value().images[0].value().imageView, vkState.defaultSamplerLinear,
+        //                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.updateSet(m_vk.device, imageSet);
+    }
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipelineLayout,
+                            0, 1, &imageSet, 0, nullptr);
+    vkCmdBindIndexBuffer(cmd, m_vulkanIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    PushConstantsBindless pcb = {};
+    pcb.vertexBuffer = m_vk.getBufferAddress(m_vulkanVertexBuffer);
+    pcb.transformBuffer = m_vk.getBufferAddress(m_vulkanTransformBuffer);
+
+    for (const auto &drawData: drawDatas) {
+        pcb.transformOffset = drawData.transformOffset;
+
         vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(PushConstants),
-                           &pc);
+                           sizeof(PushConstantsBindless),
+                           &pcb);
         if (drawData.hasIndices) {
-            vkCmdBindIndexBuffer(cmd, m_vulkanIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
         } else {
-            vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.indexOffset, 0);
+            vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
         }
     }
 
     vkCmdEndRendering(cmd);
+
+    m_vk.destroyBuffer(globalUniformBuffer);
 }

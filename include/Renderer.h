@@ -4,9 +4,10 @@
 #include <VulkanContext.h>
 #include <GltfLoader.h>
 
-struct PushConstants {
-    glm::mat4 worldMatrix;
+struct PushConstantsBindless {
     VkDeviceAddress vertexBuffer;
+    VkDeviceAddress transformBuffer;
+    uint32_t transformOffset;
 };
 
 struct DrawData {
@@ -16,6 +17,12 @@ struct DrawData {
     uint32_t transformOffset;
     uint32_t indexCount;
     uint32_t vertexCount;
+};
+
+struct GlobalUniformData {
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 projView;
 };
 
 class Renderer {
@@ -50,6 +57,8 @@ private:
     VulkanBuffer m_vulkanVertexBuffer;
     VulkanBuffer m_vulkanIndexBuffer;
     VulkanBuffer m_vulkanTransformBuffer;
+
+    GlobalUniformData m_globalUniformData;
 
     void createBuffers();
 
