@@ -105,7 +105,7 @@ VkDescriptorPool DescriptorAllocator::createPool(VkDevice device,
 }
 
 void DescriptorWriter::writeImage(int binding, VkImageView imageView, VkSampler sampler, VkImageLayout layout,
-                                  VkDescriptorType type) {
+                                  VkDescriptorType type, uint32_t dstArrayElement) {
     VkDescriptorImageInfo &info = m_imageInfos.emplace_back(
             VkDescriptorImageInfo{
                     .sampler = sampler,
@@ -120,6 +120,7 @@ void DescriptorWriter::writeImage(int binding, VkImageView imageView, VkSampler 
     write.descriptorType = type;
     write.dstBinding = binding;
     write.dstSet = VK_NULL_HANDLE; // will be filled in updateSets()
+    write.dstArrayElement = dstArrayElement;
     write.pImageInfo = &info;
 
     m_writeSets.push_back(write);
@@ -165,24 +166,24 @@ void DescriptorLayoutBuilder::addBinding(uint32_t binding, VkDescriptorType type
     newBinding.descriptorType = type;
     newBinding.descriptorCount = 1;
 
-    m_bindings.push_back(newBinding);
+    bindings.push_back(newBinding);
 }
 
 void DescriptorLayoutBuilder::clear() {
-    m_bindings.clear();
+    bindings.clear();
 }
 
 VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderStageFlags shaderStages, void *pNext,
                                                      VkDescriptorSetLayoutCreateFlags flags) {
-    for (auto& binding : m_bindings) {
+    for (auto& binding : bindings) {
         binding.stageFlags |= shaderStages;
     }
 
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.pNext = pNext;
-    info.bindingCount = static_cast<uint32_t>(m_bindings.size());
-    info.pBindings = m_bindings.data();
+    info.bindingCount = static_cast<uint32_t>(bindings.size());
+    info.pBindings = bindings.data();
     info.flags = flags;
 
     VkDescriptorSetLayout layout;

@@ -4,10 +4,16 @@
 #include <VulkanContext.h>
 #include <GltfLoader.h>
 
+struct Stats {
+    float frameTime;
+};
+
+//todo: separate into ranges
 struct PushConstantsBindless {
     VkDeviceAddress vertexBuffer;
     VkDeviceAddress transformBuffer;
     uint32_t transformOffset;
+    uint32_t textureOffset;
 };
 
 struct DrawData {
@@ -17,6 +23,7 @@ struct DrawData {
     uint32_t transformOffset;
     uint32_t indexCount;
     uint32_t vertexCount;
+    uint32_t textureOffset;
 };
 
 struct GlobalUniformData {
@@ -44,9 +51,10 @@ private:
     VkPipeline trianglePipeline;
     VkPipelineLayout trianglePipelineLayout;
 
-    VkSampler defaultSamplerLinear;
+    DescriptorAllocator globalDescriptors = {};
+    VkDescriptorSetLayout globalDescriptorLayout;
+    VkDescriptorSet bindlessDescriptorSet;
 
-    VkDescriptorSetLayout singleImageDescriptorLayout;
     VulkanContext m_vk;
     Camera m_camera;
 
@@ -59,6 +67,10 @@ private:
     VulkanBuffer m_vulkanTransformBuffer;
 
     GlobalUniformData m_globalUniformData;
+
+    std::vector<std::shared_ptr<Texture>> m_textures;
+
+    Stats m_stats;
 
     void createBuffers();
 

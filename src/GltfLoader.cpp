@@ -12,7 +12,20 @@
 #include <iostream>
 #include <Utils.h>
 
-void parseTextures(const cgltf_data *data, Scene &scene) {
+void Scene::parseTextures(const cgltf_data *data) {
+    for (auto sampler_i = 0; sampler_i < data->samplers_count; sampler_i++) {
+        const cgltf_sampler *gltfSampler = &data->samplers[sampler_i];
+        VkSamplerCreateInfo samplerInfo = {};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.minFilter = extractGltfMinFilter(gltfSampler->min_filter);
+        samplerInfo.magFilter = extractGltfMagFilter(gltfSampler->mag_filter);
+
+        VkSampler sampler;
+        vkCreateSampler(m_vkCtx->device, &samplerInfo, nullptr, &sampler);
+
+        samplers.emplace_back(sampler);
+    }
+
     for (size_t texture_i = 0; texture_i < data->textures_count; texture_i++) {
         const cgltf_texture *gltfTexture = &data->textures[texture_i];
         Texture texture = {};
@@ -21,24 +34,46 @@ void parseTextures(const cgltf_data *data, Scene &scene) {
         }
 
         size_t imageIndex = gltfTexture->image - data->images;
-        if (scene.images[imageIndex].has_value()) {
-            texture.image = scene.images[imageIndex].value();
+        if (images[imageIndex].has_value()) {
+            texture.imageview = images[imageIndex].value().imageView;
         } else {
-            texture.image = scene.m_vkCtx->defaultTextureImage;
+            texture.imageview = m_vkCtx->defaultTextureImage.imageView;
         }
+
+        if (gltfTexture->sampler && data->samplers) {
+            size_t samplerIndex = gltfTexture->sampler - data->samplers;
+            texture.sampler = samplers[samplerIndex];
+        } else {
+            texture.sampler = m_vkCtx->defaultSampler;
+        }
+
+        textures.emplace_back(std::make_shared<Texture>(texture));
     }
 }
 
-void parseMaterials(const cgltf_data *data, Scene &scene) {
+void Scene::parseMaterials(const cgltf_data *data) {
     for (size_t material_i = 0; material_i < data->materials_count; material_i++) {
         const cgltf_material *gltfMaterial = &data->materials[material_i];
+        Material material = {};
+
+        if (gltfMaterial->name) {
+            material.name = gltfMaterial->name;
+        }
+
         if (gltfMaterial->has_pbr_metallic_roughness) {
             const cgltf_pbr_metallic_roughness *gltfMetallicRoughness = &gltfMaterial->pbr_metallic_roughness;
-            GLTFMetallicRoughness::materialData materialData = {};
-            materialData.baseColorFactor = glm::make_vec4(gltfMetallicRoughness->base_color_factor);
-            materialData.metallicFactor = gltfMetallicRoughness->metallic_factor;
-            materialData.roughnessFactor = gltfMetallicRoughness->roughness_factor;
+
+            material.baseColorFactor = glm::make_vec4(gltfMetallicRoughness->base_color_factor);
+            material.metallicFactor = gltfMetallicRoughness->metallic_factor;
+            material.roughnessFactor = gltfMetallicRoughness->roughness_factor;
+
+            const cgltf_texture_view *baseColorTextureView = &gltfMaterial->pbr_metallic_roughness.base_color_texture;
+            if (baseColorTextureView) {
+                material.baseTextureOffset = baseColorTextureView->texture - data->textures;
+            }
         }
+
+        materials.emplace_back(std::make_shared<Material>(material));
     }
 }
 
@@ -85,8 +120,7 @@ VkSamplerAddressMode extractGltfWrapMode(int gltfWrap) {
     }
 }
 
-Scene::Scene(VulkanContext* vkCtx) : m_vkCtx(vkCtx) {
-
+Scene::Scene(VulkanContext *vkCtx) : m_vkCtx(vkCtx) {
 }
 
 
@@ -95,6 +129,10 @@ void Scene::clear() {
         if (image.has_value()) {
             m_vkCtx->destroyImage(image.value());
         }
+    }
+
+    for (auto &sampler: samplers) {
+        vkDestroySampler(m_vkCtx->device, sampler, nullptr);
     }
 }
 
@@ -118,6 +156,8 @@ void Scene::load(std::filesystem::path filePath) {
     }
 
     parseImages(data);
+    parseTextures(data);
+    parseMaterials(data);
     parseMesh(data);
     parseNodes(data);
 
@@ -167,8 +207,8 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.depth = 1;
 
                     newImage = m_vkCtx->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
-                                                                VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                                false);
+                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                    false);
 
                     images.emplace_back(newImage);
 
@@ -190,8 +230,8 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.depth = 1;
 
                     newImage = m_vkCtx->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
-                                                                VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                                false);
+                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                    false);
 
                     images.emplace_back(newImage);
 
@@ -206,7 +246,7 @@ void Scene::parseImages(const cgltf_data *data) {
 }
 
 void Scene::parseMesh(const cgltf_data *data) {
-        for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
+    for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
         Mesh newMesh = {};
 
         const cgltf_mesh *gltfMesh = &data->meshes[mesh_i];
@@ -217,9 +257,13 @@ void Scene::parseMesh(const cgltf_data *data) {
 
         for (size_t primitive_i = 0; primitive_i < gltfMesh->primitives_count; primitive_i++) {
             const cgltf_primitive *gltfPrimitive = &gltfMesh->primitives[primitive_i];
+            MeshPrimitive newPrimitive = {};
 
             uint32_t indexStart = static_cast<uint32_t>(indexBuffer.size());
             uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
+            newPrimitive.indexStart = indexStart;
+            newPrimitive.vertexStart = vertexStart;
+
             uint32_t indexCount = 0;
             uint32_t vertexCount = 0;
             bool hasIndices = gltfPrimitive->indices != nullptr;
@@ -298,6 +342,8 @@ void Scene::parseMesh(const cgltf_data *data) {
             }
 
             if (hasIndices) {
+                newPrimitive.hasIndices = true;
+
                 const cgltf_accessor *gltfIndexAccessor = gltfPrimitive->indices;
                 indexCount = gltfIndexAccessor->count;
                 const cgltf_buffer_view *indexBufferView = gltfIndexAccessor->buffer_view;
@@ -333,14 +379,21 @@ void Scene::parseMesh(const cgltf_data *data) {
                 }
             }
 
-            newMesh.meshPrimitives.emplace_back(indexStart, vertexStart, indexCount, vertexCount, hasIndices);
+            if (gltfPrimitive->material) {
+                newPrimitive.material = materials[gltfPrimitive->material - data->materials].get();
+            }
+
+            newPrimitive.indexCount = indexCount;
+            newPrimitive.vertexCount = vertexCount;
+
+            newMesh.meshPrimitives.emplace_back(newPrimitive);
         }
         meshes.emplace_back(std::make_shared<Mesh>(std::move(newMesh)));
     }
 }
 
 void Scene::parseNodes(const cgltf_data *data) {
-        for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
+    for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
         cgltf_node gltfNode = data->nodes[node_i];
         std::shared_ptr<Node> newNode = std::make_shared<Node>();
 

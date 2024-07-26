@@ -11,6 +11,9 @@ struct VulkanFeatures {
     bool synchronization2 = true;
     bool bufferDeviceAddress = true;
     bool descriptorIndexing = true;
+    bool runtimeDescriptorArray = true;
+    bool shaderSampledImageArrayNonUniformIndexing = false;
+    bool shaderStorageBufferArrayNonUniformIndexing = false;
 };
 
 struct VulkanBuffer {

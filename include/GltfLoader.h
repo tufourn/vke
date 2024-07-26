@@ -10,26 +10,16 @@
 
 struct Texture {
     std::string name;
-    VulkanImage image;
+    VkImageView imageview;
     VkSampler sampler;
 };
 
-struct MaterialPipeline {
-    VkPipeline pipeline;
-    VkPipelineLayout layout;
-};
-
-struct MaterialInstance {
-    MaterialPipeline *pipeline;
-    VkDescriptorSet materialSet;
-};
-
-struct GLTFMetallicRoughness {
-    struct materialData {
-        glm::vec4 baseColorFactor = {1.f, 1.f, 1.f, 1.f};
-        float metallicFactor = 1.f;
-        float roughnessFactor = 1.f;
-    };
+struct Material {
+    std::string name;
+    glm::vec4 baseColorFactor = {1.f, 1.f, 1.f, 1.f};
+    float metallicFactor = 1.f;
+    float roughnessFactor = 1.f;
+    uint32_t baseTextureOffset = UINT32_MAX;
 };
 
 struct MeshPrimitive {
@@ -37,6 +27,7 @@ struct MeshPrimitive {
     uint32_t vertexStart;
     uint32_t indexCount;
     uint32_t vertexCount;
+    Material* material = nullptr;
     bool hasIndices;
 };
 
@@ -76,8 +67,9 @@ public:
     bool loaded = false;
 
     std::vector<std::optional<VulkanImage> > images;
+    std::vector<VkSampler> samplers;
     std::vector<std::shared_ptr<Texture> > textures;
-    std::vector<std::shared_ptr<MaterialInstance> > materials;
+    std::vector<std::shared_ptr<Material> > materials;
     std::vector<std::shared_ptr<Mesh> > meshes;
 
     std::vector<std::shared_ptr<Node> > nodes;
@@ -98,12 +90,11 @@ private:
     void parseMesh(const cgltf_data *data);
 
     void parseNodes(const cgltf_data *data);
+
+    void parseTextures(const cgltf_data *data);
+
+    void parseMaterials(const cgltf_data *data);
 };
-
-//todo
-void parseTextures(const cgltf_data *data, Scene &scene);
-
-void parseMaterials(const cgltf_data *data, Scene &scene);
 
 static VkFilter extractGltfMagFilter(int gltfMagFilter);
 

@@ -57,6 +57,9 @@ void VulkanContext::initVulkanDevice() {
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.bufferDeviceAddress = features.bufferDeviceAddress ? VK_TRUE : VK_FALSE;
     features12.descriptorIndexing = features.descriptorIndexing ? VK_TRUE : VK_FALSE;
+    features12.runtimeDescriptorArray = features.runtimeDescriptorArray ? VK_TRUE : VK_FALSE;
+    features12.shaderSampledImageArrayNonUniformIndexing = features.shaderSampledImageArrayNonUniformIndexing ? VK_TRUE : VK_FALSE;
+    features12.shaderStorageBufferArrayNonUniformIndexing = features.shaderStorageBufferArrayNonUniformIndexing ? VK_TRUE : VK_FALSE;
 
     vkb::PhysicalDeviceSelector selector{instance};
     vkb::PhysicalDevice vkbPhysicalDevice = selector
@@ -96,6 +99,7 @@ void VulkanContext::terminate() {
     destroyImage(drawImage);
     destroyImage(depthImage);
     destroyImage(defaultTextureImage);
+    vkDestroySampler(device, defaultSampler, nullptr);
 
     destroySwapchain();
 
@@ -199,6 +203,13 @@ void VulkanContext::initDefaultData() {
     defaultTextureImage = createImage(checker.data(), VkExtent3D(8, 8, 1),
                                  VK_FORMAT_R8G8B8A8_UNORM,
                                  VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+    VkSamplerCreateInfo samplerInfo = {};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+
+    vkCreateSampler(device, &samplerInfo, nullptr, &defaultSampler);
 }
 
 void VulkanContext::resizeWindow() {

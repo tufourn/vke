@@ -33,7 +33,8 @@ private:
 };
 
 struct DescriptorWriter {
-    void writeImage(int binding, VkImageView imageView, VkSampler sampler, VkImageLayout layout, VkDescriptorType type);
+    void writeImage(int binding, VkImageView imageView, VkSampler sampler, VkImageLayout layout,
+                    VkDescriptorType type, uint32_t dstArrayElement = 0);
 
     void writeBuffer(int binding, VkBuffer buffer, size_t size, size_t offset, VkDescriptorType type);
 
@@ -55,6 +56,5 @@ struct DescriptorLayoutBuilder {
     VkDescriptorSetLayout build(VkDevice device, VkShaderStageFlags shaderStages,
                                 void *pNext = nullptr, VkDescriptorSetLayoutCreateFlags flags = 0);
 
-private:
-    std::vector<VkDescriptorSetLayoutBinding> m_bindings;
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
 };

@@ -56,6 +56,7 @@ struct VulkanContext {
     VulkanImage depthImage = {};
 
     VulkanImage defaultTextureImage = {};
+    VkSampler defaultSampler = {};
 
     std::array<FrameData, MAX_CONCURRENT_FRAMES> frames;
 

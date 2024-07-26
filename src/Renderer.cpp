@@ -8,6 +8,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+static constexpr uint32_t MAX_TEXTURES = 1024;
+
+static constexpr uint32_t UNIFORM_BINDING = 0;
+static constexpr uint32_t TEXTURE_BINDING = 1;
+
 Renderer::Renderer() {
     setupVulkan();
 }
@@ -119,8 +124,10 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
 
     m_indexBuffer.insert(m_indexBuffer.end(), scene.indexBuffer.begin(), scene.indexBuffer.end());
     m_vertexBuffer.insert(m_vertexBuffer.end(), scene.vertexBuffer.begin(), scene.vertexBuffer.end());
+    m_textures.insert(m_textures.end(), scene.textures.begin(), scene.textures.end());
 
     scenes.emplace_back(scene);
+    //todo: add offsets for multiple scenes
 
     createDrawDatas();
     createBuffers();
@@ -186,6 +193,14 @@ void Renderer::createBuffers() {
 }
 
 void Renderer::createDrawDatas() {
+    for (size_t texture_i = 0; texture_i < m_textures.size(); texture_i++) {
+        DescriptorWriter writer;
+        writer.writeImage(TEXTURE_BINDING, m_textures[texture_i]->imageview, m_textures[texture_i]->sampler,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                          texture_i);
+        writer.updateSet(m_vk.device, bindlessDescriptorSet);
+    }
+
     for (const auto &scene: scenes) {
         for (const auto &topLevelNode: scene.topLevelNodes) {
             std::stack<std::shared_ptr<Node> > nodeStack;
@@ -204,12 +219,13 @@ void Renderer::createDrawDatas() {
                 if (const auto &nodeMesh = currentNode->mesh) {
                     for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
                         DrawData drawData = {};
-                        //todo: support multiple scenes
                         drawData.hasIndices = meshPrimitive.hasIndices;
                         drawData.indexOffset = meshPrimitive.indexStart;
                         drawData.vertexOffset = meshPrimitive.vertexStart;
                         drawData.indexCount = meshPrimitive.indexCount;
                         drawData.vertexCount = meshPrimitive.vertexCount;
+                        //todo: support multiple scenes
+                        drawData.textureOffset = meshPrimitive.material->baseTextureOffset;
                         drawData.transformOffset = m_transformBuffer.size();
 
                         drawDatas.emplace_back(drawData);
@@ -231,8 +247,8 @@ void Renderer::setupVulkan() {
 
     for (size_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
         std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
         };
 
         m_vk.frames[i].frameDescriptors = DescriptorAllocator();
@@ -244,19 +260,34 @@ void Renderer::setupVulkan() {
     glfwSetKeyCallback(m_vk.window, Camera::keyCallback);
     glfwSetMouseButtonCallback(m_vk.window, Camera::mouseButtonCallback);
 
-    VkSamplerCreateInfo samplerInfo = {};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-
-    vkCreateSampler(m_vk.device, &samplerInfo, nullptr, &defaultSamplerLinear);
-
     DescriptorLayoutBuilder descriptorLayoutBuilder;
-    descriptorLayoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    descriptorLayoutBuilder.addBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    singleImageDescriptorLayout = descriptorLayoutBuilder.build(m_vk.device,
-                                                                VK_SHADER_STAGE_VERTEX_BIT |
-                                                                VK_SHADER_STAGE_FRAGMENT_BIT);
+    descriptorLayoutBuilder.addBinding(UNIFORM_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    std::array<VkDescriptorBindingFlags, 2> flagArray = {
+        0,
+        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
+    };
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo bindFlags = {};
+    bindFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    bindFlags.bindingCount = static_cast<uint32_t>(flagArray.size());
+    bindFlags.pBindingFlags = flagArray.data();
+    descriptorLayoutBuilder.bindings[TEXTURE_BINDING].descriptorCount = MAX_TEXTURES;
+
+    globalDescriptorLayout = descriptorLayoutBuilder.build(m_vk.device,
+                                                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                                           &bindFlags,
+                                                           VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+
+    std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
+    };
+
+    globalDescriptors = DescriptorAllocator();
+    globalDescriptors.init(m_vk.device, 1000, frameSizes);
+    bindlessDescriptorSet = globalDescriptors.allocate(m_vk.device, globalDescriptorLayout);
 
     VkPushConstantRange pushConstantsRange = {};
     pushConstantsRange.offset = 0;
@@ -265,7 +296,7 @@ void Renderer::setupVulkan() {
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkInit::pipelineLayoutCreateInfo();
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &singleImageDescriptorLayout;
+    pipelineLayoutInfo.pSetLayouts = &globalDescriptorLayout;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantsRange;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
 
@@ -273,7 +304,7 @@ void Renderer::setupVulkan() {
 
     VkShaderModule triangleVertShader, triangleFragShader;
     VK_CHECK(m_vk.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
-    VK_CHECK(m_vk.createShaderModule("shaders/textured_triangle.frag.spv", &triangleFragShader))
+    VK_CHECK(m_vk.createShaderModule("shaders/texture_bindless.frag.spv", &triangleFragShader))
 
     PipelineBuilder trianglePipelineBuilder;
     trianglePipelineBuilder
@@ -284,7 +315,6 @@ void Renderer::setupVulkan() {
             .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .setMultisamplingNone()
             .disableBlending()
-            // .disableDepthTest()
             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL)
             .setColorAttachmentFormat(m_vk.drawImage.imageFormat)
             .setDepthAttachmentFormat(m_vk.depthImage.imageFormat);
@@ -306,15 +336,15 @@ void Renderer::terminateVulkan() {
         m_vk.frames[i].frameDescriptors.destroyPools(m_vk.device);
     }
 
+    globalDescriptors.destroyPools(m_vk.device);
+
     if (!m_indexBuffer.empty()) {
         m_vk.destroyBuffer(m_vulkanIndexBuffer);
     }
     m_vk.destroyBuffer(m_vulkanVertexBuffer);
     m_vk.destroyBuffer(m_vulkanTransformBuffer);
 
-    vkDestroyDescriptorSetLayout(m_vk.device, singleImageDescriptorLayout, nullptr);
-
-    vkDestroySampler(m_vk.device, defaultSamplerLinear, nullptr);
+    vkDestroyDescriptorSetLayout(m_vk.device, globalDescriptorLayout, nullptr);
 
     vkDestroyPipelineLayout(m_vk.device, trianglePipelineLayout, nullptr);
     vkDestroyPipeline(m_vk.device, trianglePipeline, nullptr);
@@ -340,6 +370,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(m_vk.windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
+
+    auto start = std::chrono::system_clock::now();
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
 
@@ -379,20 +411,13 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     GlobalUniformData *globalUniformData = static_cast<GlobalUniformData *>(globalUniformBuffer.info.pMappedData);
     *globalUniformData = m_globalUniformData;
 
-    // bind texture
-    VkDescriptorSet imageSet = m_vk.frames[currentFrame].frameDescriptors
-            .allocate(m_vk.device, singleImageDescriptorLayout); {
-        DescriptorWriter writer;
-        writer.writeImage(0, m_vk.defaultTextureImage.imageView, defaultSamplerLinear,
-                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.writeBuffer(1, globalUniformBuffer.buffer, sizeof(GlobalUniformData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        // writer.writeImage(0, sc.value().images[0].value().imageView, vkState.defaultSamplerLinear,
-        //                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.updateSet(m_vk.device, imageSet);
-    }
+    DescriptorWriter writer;
+    writer.writeBuffer(0, globalUniformBuffer.buffer, sizeof(GlobalUniformData), 0,
+                       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.updateSet(m_vk.device, bindlessDescriptorSet);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipelineLayout,
-                            0, 1, &imageSet, 0, nullptr);
+                            0, 1, &bindlessDescriptorSet, 0, nullptr);
     vkCmdBindIndexBuffer(cmd, m_vulkanIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
     PushConstantsBindless pcb = {};
@@ -401,8 +426,9 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     for (const auto &drawData: drawDatas) {
         pcb.transformOffset = drawData.transformOffset;
+        pcb.textureOffset = drawData.textureOffset;
 
-        vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+        vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                            sizeof(PushConstantsBindless),
                            &pcb);
         if (drawData.hasIndices) {
@@ -411,6 +437,11 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
             vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
         }
     }
+
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    std::cout << "draw time: " << elapsed.count() / 1000.f << std::endl;
 
     vkCmdEndRendering(cmd);
 
