@@ -5,7 +5,7 @@
 #include <vector>
 #include <deque>
 
-constexpr uint32_t MAX_SETS_PER_POOL = 4092;
+constexpr uint32_t MAX_SETS_PER_POOL = 4096;
 
 struct DescriptorAllocator {
     struct PoolSizeRatio {
@@ -13,7 +13,8 @@ struct DescriptorAllocator {
         float ratio;
     };
 
-    void init(VkDevice device, uint32_t initialSets, std::span<PoolSizeRatio> poolRatios);
+    void init(VkDevice device, uint32_t initialSets, std::span<PoolSizeRatio> poolRatios,
+              VkDescriptorPoolCreateFlags poolFlags = 0);
 
     void clearPools(VkDevice device);
 
@@ -24,7 +25,8 @@ struct DescriptorAllocator {
 private:
     VkDescriptorPool getPool(VkDevice device);
 
-    VkDescriptorPool createPool(VkDevice device, uint32_t setCount, std::span<PoolSizeRatio> poolRatios);
+    VkDescriptorPool createPool(VkDevice device, uint32_t setCount, std::span<PoolSizeRatio> poolRatios,
+                                VkDescriptorPoolCreateFlags poolFlags = 0);
 
     std::vector<PoolSizeRatio> m_ratios;
     std::vector<VkDescriptorPool> m_fullPools;

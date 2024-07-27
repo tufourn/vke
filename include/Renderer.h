@@ -52,8 +52,8 @@ private:
     VkPipelineLayout trianglePipelineLayout;
 
     DescriptorAllocator globalDescriptors = {};
-    VkDescriptorSetLayout globalDescriptorLayout;
-    VkDescriptorSet bindlessDescriptorSet;
+    VkDescriptorSetLayout globalDescriptorLayout = {};
+    std::array<VkDescriptorSet, MAX_CONCURRENT_FRAMES> bindlessDescriptorSets;
 
     VulkanContext m_vk;
     Camera m_camera;
@@ -62,11 +62,13 @@ private:
     std::vector<Vertex> m_vertexBuffer;
     std::vector<glm::mat4> m_transformBuffer;
 
-    VulkanBuffer m_vulkanVertexBuffer;
-    VulkanBuffer m_vulkanIndexBuffer;
-    VulkanBuffer m_vulkanTransformBuffer;
+    VulkanBuffer m_boundedVertexBuffer;
+    VulkanBuffer m_boundedIndexBuffer;
+    VulkanBuffer m_boundedTransformBuffer;
 
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_uniformBuffers;
     GlobalUniformData m_globalUniformData;
+    VulkanBuffer m_boundedUniformBuffer;
 
     std::vector<std::shared_ptr<Texture>> m_textures;
 

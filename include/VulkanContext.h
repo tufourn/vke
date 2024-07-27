@@ -16,16 +16,15 @@
 #include "VulkanTypes.h"
 #include "VulkanDescriptor.h"
 
+constexpr int MAX_CONCURRENT_FRAMES = 2;
+
 struct FrameData {
     VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
     VkSemaphore renderSemaphore = VK_NULL_HANDLE;
     VkFence renderFence = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    DescriptorAllocator frameDescriptors = {};
 };
-
-constexpr int MAX_CONCURRENT_FRAMES = 2;
 
 struct VulkanContext {
     vkb::Instance instance = {};

@@ -60,6 +60,9 @@ void VulkanContext::initVulkanDevice() {
     features12.runtimeDescriptorArray = features.runtimeDescriptorArray ? VK_TRUE : VK_FALSE;
     features12.shaderSampledImageArrayNonUniformIndexing = features.shaderSampledImageArrayNonUniformIndexing ? VK_TRUE : VK_FALSE;
     features12.shaderStorageBufferArrayNonUniformIndexing = features.shaderStorageBufferArrayNonUniformIndexing ? VK_TRUE : VK_FALSE;
+    features12.descriptorBindingSampledImageUpdateAfterBind = features.descriptorBindingSampledImageUpdateAfterBind ? VK_TRUE : VK_FALSE;
+    features12.descriptorBindingPartiallyBound = features.descriptorBindingPartiallyBound ? VK_TRUE : VK_FALSE;
+    features12.descriptorBindingVariableDescriptorCount = features.descriptorBindingVariableDescriptorCount ? VK_TRUE : VK_FALSE;
 
     vkb::PhysicalDeviceSelector selector{instance};
     vkb::PhysicalDevice vkbPhysicalDevice = selector

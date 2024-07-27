@@ -222,7 +222,7 @@ void Scene::parseImages(const cgltf_data *data) {
             } else {
                 // todo: load image from file and from buffer
                 std::filesystem::path imageFile = directory / uri;
-                unsigned char *stbData = stbi_load(imageFile.c_str(), &width, &height, &numChannels, 4);
+                unsigned char *stbData = stbi_load(imageFile.string().c_str(), &width, &height, &numChannels, 4);
                 if (stbData) {
                     VkExtent3D imageExtent;
                     imageExtent.width = width;

@@ -12,14 +12,17 @@ struct VulkanFeatures {
     bool bufferDeviceAddress = true;
     bool descriptorIndexing = true;
     bool runtimeDescriptorArray = true;
-    bool shaderSampledImageArrayNonUniformIndexing = false;
-    bool shaderStorageBufferArrayNonUniformIndexing = false;
+    bool shaderSampledImageArrayNonUniformIndexing = true;
+    bool shaderStorageBufferArrayNonUniformIndexing = true;
+    bool descriptorBindingSampledImageUpdateAfterBind = true;
+    bool descriptorBindingPartiallyBound = true;
+    bool descriptorBindingVariableDescriptorCount = true;
 };
 
 struct VulkanBuffer {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocationInfo info;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    VmaAllocationInfo info = {};
 };
 
 struct VulkanImage {

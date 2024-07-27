@@ -1,24 +1,25 @@
 #include "VulkanDescriptor.h"
 #include "VulkanUtils.h"
 
-void DescriptorAllocator::init(VkDevice device, uint32_t initialSets, std::span<PoolSizeRatio> poolRatios) {
+void DescriptorAllocator::init(VkDevice device, uint32_t initialSets, std::span<PoolSizeRatio> poolRatios,
+                               VkCommandPoolCreateFlags poolFlags) {
     m_ratios.clear();
 
-    for (auto& ratio: poolRatios) {
+    for (auto &ratio: poolRatios) {
         m_ratios.push_back(ratio);
     }
 
-    VkDescriptorPool newPool = createPool(device, initialSets, poolRatios);
+    VkDescriptorPool newPool = createPool(device, initialSets, poolRatios, poolFlags);
 
     m_readyPools.push_back(newPool);
 }
 
 void DescriptorAllocator::clearPools(VkDevice device) {
-    for (auto& pool: m_readyPools) {
+    for (auto &pool: m_readyPools) {
         vkResetDescriptorPool(device, pool, 0);
     }
 
-    for (auto& pool: m_fullPools) {
+    for (auto &pool: m_fullPools) {
         vkResetDescriptorPool(device, pool, 0);
         m_readyPools.push_back(pool);
     }
@@ -27,11 +28,11 @@ void DescriptorAllocator::clearPools(VkDevice device) {
 }
 
 void DescriptorAllocator::destroyPools(VkDevice device) {
-    for (auto& pool: m_readyPools) {
+    for (auto &pool: m_readyPools) {
         vkDestroyDescriptorPool(device, pool, nullptr);
     }
 
-    for (auto& pool: m_fullPools) {
+    for (auto &pool: m_fullPools) {
         vkDestroyDescriptorPool(device, pool, nullptr);
     }
 
@@ -82,7 +83,8 @@ VkDescriptorPool DescriptorAllocator::getPool(VkDevice device) {
 
 VkDescriptorPool DescriptorAllocator::createPool(VkDevice device,
                                                  uint32_t setCount,
-                                                 std::span<PoolSizeRatio> poolRatios) {
+                                                 std::span<PoolSizeRatio> poolRatios,
+                                                 VkDescriptorPoolCreateFlags poolFlags) {
     std::vector<VkDescriptorPoolSize> poolSizes;
     for (PoolSizeRatio ratio: poolRatios) {
         poolSizes.push_back(VkDescriptorPoolSize{
@@ -93,7 +95,7 @@ VkDescriptorPool DescriptorAllocator::createPool(VkDevice device,
 
     VkDescriptorPoolCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    info.flags = 0;
+    info.flags = poolFlags;
     info.maxSets = setCount;
     info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     info.pPoolSizes = poolSizes.data();
@@ -175,7 +177,7 @@ void DescriptorLayoutBuilder::clear() {
 
 VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderStageFlags shaderStages, void *pNext,
                                                      VkDescriptorSetLayoutCreateFlags flags) {
-    for (auto& binding : bindings) {
+    for (auto &binding: bindings) {
         binding.stageFlags |= shaderStages;
     }
 
