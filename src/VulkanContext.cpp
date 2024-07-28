@@ -19,7 +19,6 @@ void VulkanContext::init() {
     initSwapchain();
     initCommands();
     initSyncStructures();
-    initDefaultData();
 }
 
 void VulkanContext::initWindow() {
@@ -101,8 +100,6 @@ void VulkanContext::terminate() {
 
     destroyImage(drawImage);
     destroyImage(depthImage);
-    destroyImage(defaultTextureImage);
-    vkDestroySampler(device, defaultSampler, nullptr);
 
     destroySwapchain();
 
@@ -191,28 +188,6 @@ void VulkanContext::initVmaAllocator() {
     allocatorInfo.pVulkanFunctions = &vmaVulkanFunc;
 
     vmaCreateAllocator(&allocatorInfo, &allocator);
-}
-
-void VulkanContext::initDefaultData() {
-    uint32_t black = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
-    uint32_t magenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
-    std::array<uint32_t, 8 * 8> checker = {};
-    for (size_t x = 0; x < 8; x++) {
-        for (size_t y = 0; y < 8; y++) {
-            checker[y * 8 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
-        }
-    }
-
-    defaultTextureImage = createImage(checker.data(), VkExtent3D(8, 8, 1),
-                                 VK_FORMAT_R8G8B8A8_UNORM,
-                                 VK_IMAGE_USAGE_SAMPLED_BIT, false);
-
-    VkSamplerCreateInfo samplerInfo = {};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-
-    vkCreateSampler(device, &samplerInfo, nullptr, &defaultSampler);
 }
 
 void VulkanContext::resizeWindow() {

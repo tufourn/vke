@@ -5,6 +5,7 @@
 #include <volk.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <string>
 
 struct VulkanFeatures {
     bool dynamicRendering = true;
@@ -44,5 +45,33 @@ struct GPUMeshBuffers {
     VulkanBuffer indexBuffer;
     VulkanBuffer vertexBuffer;
     VkDeviceAddress vertexBufferAddress;
+};
+
+struct Texture {
+    std::string name;
+    VkImageView imageview;
+    VkSampler sampler;
+};
+
+struct Material {
+    glm::vec4 baseColorFactor = {1.f, 1.f, 1.f, 1.f};
+    float metallicFactor = 1.f;
+    float roughnessFactor = 1.f;
+    uint32_t baseTextureOffset = 0;
+    float pad0;
+};
+
+struct MeshPrimitive {
+    uint32_t indexStart;
+    uint32_t vertexStart;
+    uint32_t indexCount;
+    uint32_t vertexCount;
+    uint32_t materialOffset;
+    bool hasIndices;
+};
+
+struct Mesh {
+    std::string name;
+    std::vector<MeshPrimitive> meshPrimitives;
 };
 

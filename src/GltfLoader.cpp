@@ -1,4 +1,5 @@
 #include "GltfLoader.h"
+#include "Renderer.h"
 
 #define CGLTF_IMPLEMENTATION
 #define GLM_ENABLE_EXPERIMENTAL
@@ -21,7 +22,7 @@ void Scene::parseTextures(const cgltf_data *data) {
         samplerInfo.magFilter = extractGltfMagFilter(gltfSampler->mag_filter);
 
         VkSampler sampler;
-        vkCreateSampler(m_vkCtx->device, &samplerInfo, nullptr, &sampler);
+        vkCreateSampler(renderer->vulkanContext.device, &samplerInfo, nullptr, &sampler);
 
         samplers.emplace_back(sampler);
     }
@@ -37,14 +38,14 @@ void Scene::parseTextures(const cgltf_data *data) {
         if (images[imageIndex].has_value()) {
             texture.imageview = images[imageIndex].value().imageView;
         } else {
-            texture.imageview = m_vkCtx->defaultTextureImage.imageView;
+            texture.imageview = renderer->defaultTextureImage.imageView;
         }
 
         if (gltfTexture->sampler && data->samplers) {
             size_t samplerIndex = gltfTexture->sampler - data->samplers;
             texture.sampler = samplers[samplerIndex];
         } else {
-            texture.sampler = m_vkCtx->defaultSampler;
+            texture.sampler = renderer->defaultSampler;
         }
 
         textures.emplace_back(std::make_shared<Texture>(texture));
@@ -57,7 +58,9 @@ void Scene::parseMaterials(const cgltf_data *data) {
         Material material = {};
 
         if (gltfMaterial->name) {
-            material.name = gltfMaterial->name;
+            materialNames.emplace_back(gltfMaterial->name);
+        } else {
+            materialNames.emplace_back();
         }
 
         if (gltfMaterial->has_pbr_metallic_roughness) {
@@ -73,7 +76,7 @@ void Scene::parseMaterials(const cgltf_data *data) {
             }
         }
 
-        materials.emplace_back(std::make_shared<Material>(material));
+        materials.emplace_back(material);
     }
 }
 
@@ -120,19 +123,19 @@ VkSamplerAddressMode extractGltfWrapMode(int gltfWrap) {
     }
 }
 
-Scene::Scene(VulkanContext *vkCtx) : m_vkCtx(vkCtx) {
+Scene::Scene(Renderer *renderer) : renderer(renderer) {
 }
 
 
 void Scene::clear() {
     for (auto &image: images) {
         if (image.has_value()) {
-            m_vkCtx->destroyImage(image.value());
+            renderer->vulkanContext.destroyImage(image.value());
         }
     }
 
     for (auto &sampler: samplers) {
-        vkDestroySampler(m_vkCtx->device, sampler, nullptr);
+        vkDestroySampler(renderer->vulkanContext.device, sampler, nullptr);
     }
 }
 
@@ -206,7 +209,7 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.height = height;
                     imageExtent.depth = 1;
 
-                    newImage = m_vkCtx->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                    newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                     VK_IMAGE_USAGE_SAMPLED_BIT,
                                                     false);
 
@@ -229,7 +232,7 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.height = height;
                     imageExtent.depth = 1;
 
-                    newImage = m_vkCtx->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                    newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                     VK_IMAGE_USAGE_SAMPLED_BIT,
                                                     false);
 
@@ -380,7 +383,9 @@ void Scene::parseMesh(const cgltf_data *data) {
             }
 
             if (gltfPrimitive->material) {
-                newPrimitive.material = materials[gltfPrimitive->material - data->materials].get();
+                newPrimitive.materialOffset = gltfPrimitive->material - data->materials;
+            } else {
+                newPrimitive.materialOffset = UINT32_MAX; // default material
             }
 
             newPrimitive.indexCount = indexCount;

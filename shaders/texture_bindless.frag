@@ -19,6 +19,15 @@ struct Vertex {
     float uv_y;
 };
 
+struct Material {
+    vec4 baseColorFactor;
+
+    float metallicFactor;
+    float roughnessFactor;
+    uint baseTextureOffset;
+    float pad0;
+};
+
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
     Vertex vertices[];
 };
@@ -27,16 +36,23 @@ layout(buffer_reference, std430) readonly buffer TransformBuffer {
     mat4 transforms[];
 };
 
+layout(buffer_reference, std430) readonly buffer MaterialBuffer {
+    Material materials[];
+};
+
 //push constants block
 layout(push_constant) uniform constants
 {
     VertexBuffer vertexBuffer;
     TransformBuffer transformBuffer;
+    MaterialBuffer materialBuffer;
     uint transformOffset;
-    uint textureOffset;
+    uint materialOffset;
+    float pad0[3];
 } pc;
 
 void main()
 {
-    outFragColor = texture(displayTexture[nonuniformEXT(pc.textureOffset)], inUV);
+    Material material = pc.materialBuffer.materials[pc.materialOffset];
+    outFragColor = texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
 }

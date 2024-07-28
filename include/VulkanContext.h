@@ -54,9 +54,6 @@ struct VulkanContext {
     VulkanImage drawImage = {};
     VulkanImage depthImage = {};
 
-    VulkanImage defaultTextureImage = {};
-    VkSampler defaultSampler = {};
-
     std::array<FrameData, MAX_CONCURRENT_FRAMES> frames;
 
     void init();
@@ -110,6 +107,4 @@ private:
     void initSyncStructures();
 
     void initVmaAllocator();
-
-    void initDefaultData();
 };

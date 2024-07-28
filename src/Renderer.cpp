@@ -22,23 +22,24 @@ Renderer::~Renderer() {
 }
 
 void Renderer::run() {
-    while (!glfwWindowShouldClose(m_vk.window)) {
+    while (!glfwWindowShouldClose(vulkanContext.window)) {
         glfwPollEvents();
         m_camera.update();
 
-        vkWaitForFences(m_vk.device, 1, &m_vk.frames[currentFrame].renderFence, VK_TRUE, 1e9);
-        VK_CHECK(vkResetFences(m_vk.device, 1, &m_vk.frames[currentFrame].renderFence))
+        vkWaitForFences(vulkanContext.device, 1, &vulkanContext.frames[currentFrame].renderFence, VK_TRUE, 1e9);
+        VK_CHECK(vkResetFences(vulkanContext.device, 1, &vulkanContext.frames[currentFrame].renderFence))
 
         uint32_t imageIndex;
-        VkResult swapchainRet = vkAcquireNextImageKHR(m_vk.device, m_vk.swapchain, 1e9,
-                                                      m_vk.frames[currentFrame].imageAvailableSemaphore, VK_NULL_HANDLE,
+        VkResult swapchainRet = vkAcquireNextImageKHR(vulkanContext.device, vulkanContext.swapchain, 1e9,
+                                                      vulkanContext.frames[currentFrame].imageAvailableSemaphore,
+                                                      VK_NULL_HANDLE,
                                                       &imageIndex);
         if (swapchainRet == VK_ERROR_OUT_OF_DATE_KHR) {
-            m_vk.resizeWindow();
+            vulkanContext.resizeWindow();
             continue;
         }
 
-        VkCommandBuffer cmd = m_vk.frames[currentFrame].commandBuffer;
+        VkCommandBuffer cmd = vulkanContext.frames[currentFrame].commandBuffer;
 
         VK_CHECK(vkResetCommandBuffer(cmd, 0))
 
@@ -47,7 +48,7 @@ void Renderer::run() {
 
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo))
 
-        VkUtil::transitionImage(cmd, m_vk.drawImage.image,
+        VkUtil::transitionImage(cmd, vulkanContext.drawImage.image,
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -56,29 +57,30 @@ void Renderer::run() {
 
         VkImageSubresourceRange clearRange = VkInit::imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
-        vkCmdClearColorImage(cmd, m_vk.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+        vkCmdClearColorImage(cmd, vulkanContext.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 
-        VkUtil::transitionImage(cmd, m_vk.drawImage.image,
+        VkUtil::transitionImage(cmd, vulkanContext.drawImage.image,
                                 VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
         drawGeometry(cmd);
 
-        VkUtil::transitionImage(cmd, m_vk.drawImage.image,
+        VkUtil::transitionImage(cmd, vulkanContext.drawImage.image,
                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
-        VkUtil::transitionImage(cmd, m_vk.swapchainImages[imageIndex],
+        VkUtil::transitionImage(cmd, vulkanContext.swapchainImages[imageIndex],
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
-        VkUtil::copyImageToImage(cmd, m_vk.drawImage.image, m_vk.swapchainImages[imageIndex], m_vk.windowExtent,
-                                 m_vk.windowExtent);
+        VkUtil::copyImageToImage(cmd, vulkanContext.drawImage.image, vulkanContext.swapchainImages[imageIndex],
+                                 vulkanContext.windowExtent,
+                                 vulkanContext.windowExtent);
 
-        VkUtil::transitionImage(cmd, m_vk.swapchainImages[imageIndex],
+        VkUtil::transitionImage(cmd, vulkanContext.swapchainImages[imageIndex],
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                                 VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
@@ -88,28 +90,29 @@ void Renderer::run() {
         VkCommandBufferSubmitInfo cmdSubmitInfo = VkInit::commandBufferSubmitInfo(cmd);
 
         VkSemaphoreSubmitInfo waitInfo = VkInit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                                     m_vk.frames[currentFrame].imageAvailableSemaphore);
+                                                                     vulkanContext.frames[currentFrame].imageAvailableSemaphore);
         VkSemaphoreSubmitInfo signalInfo = VkInit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                                                                       m_vk.frames[currentFrame].renderSemaphore);
+                                                                       vulkanContext.frames[currentFrame].renderSemaphore);
 
         VkSubmitInfo2 submit = VkInit::submitInfo(&cmdSubmitInfo, &signalInfo, &waitInfo);
 
-        VK_CHECK(vkQueueSubmit2(m_vk.graphicsQueue, 1, &submit, m_vk.frames[currentFrame].renderFence))
+        VK_CHECK(
+                vkQueueSubmit2(vulkanContext.graphicsQueue, 1, &submit, vulkanContext.frames[currentFrame].renderFence))
 
         VkPresentInfoKHR presentInfo = {};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.pNext = nullptr;
-        presentInfo.pSwapchains = &m_vk.swapchain.swapchain;
+        presentInfo.pSwapchains = &vulkanContext.swapchain.swapchain;
         presentInfo.swapchainCount = 1;
 
-        presentInfo.pWaitSemaphores = &m_vk.frames[currentFrame].renderSemaphore;
+        presentInfo.pWaitSemaphores = &vulkanContext.frames[currentFrame].renderSemaphore;
         presentInfo.waitSemaphoreCount = 1;
 
         presentInfo.pImageIndices = &imageIndex;
 
-        VkResult presentRet = vkQueuePresentKHR(m_vk.presentQueue, &presentInfo);
+        VkResult presentRet = vkQueuePresentKHR(vulkanContext.presentQueue, &presentInfo);
         if (presentRet == VK_ERROR_OUT_OF_DATE_KHR) {
-            m_vk.resizeWindow();
+            vulkanContext.resizeWindow();
         }
 
         currentFrame = (currentFrame + 1) % MAX_CONCURRENT_FRAMES;
@@ -117,52 +120,80 @@ void Renderer::run() {
 }
 
 void Renderer::loadGltf(std::filesystem::path filePath) {
-    Scene scene(&m_vk);
+    Scene scene(this);
     scene.load(filePath);
 
-    m_indexBuffer.insert(m_indexBuffer.end(), scene.indexBuffer.begin(), scene.indexBuffer.end());
-    m_vertexBuffer.insert(m_vertexBuffer.end(), scene.vertexBuffer.begin(), scene.vertexBuffer.end());
+    SceneBufferOffsets sceneOffsets = {};
+
+    sceneOffsets.indexOffset = m_indices.size();
+    m_indices.insert(m_indices.end(), scene.indexBuffer.begin(), scene.indexBuffer.end());
+
+    sceneOffsets.vertexOffset = m_vertices.size();
+    m_vertices.insert(m_vertices.end(), scene.vertexBuffer.begin(), scene.vertexBuffer.end());
+
+    sceneOffsets.textureOffset = m_textures.size();
     m_textures.insert(m_textures.end(), scene.textures.begin(), scene.textures.end());
 
-    scenes.emplace_back(scene);
-    //todo: add offsets for multiple scenes
+    sceneOffsets.materialOffset = m_materials.size();
+    m_materials.insert(m_materials.end(), scene.materials.begin(), scene.materials.end());
+
+    // make sure material points to the right texture
+    for (size_t material_i = sceneOffsets.materialOffset; material_i < m_materials.size(); material_i++) {
+        m_materials[material_i].baseTextureOffset += sceneOffsets.textureOffset;
+    }
+
+    m_scenes.emplace_back(scene, sceneOffsets);
 
     createDrawDatas();
     createBuffers();
 }
 
 void Renderer::createBuffers() {
-    const size_t vertexBufferSize = m_vertexBuffer.size() * sizeof(Vertex);
-    const size_t indexBufferSize = m_indexBuffer.size() * sizeof(uint32_t);
-    const size_t transformBufferSize = m_transformBuffer.size() * sizeof(glm::mat4);
+    const size_t vertexBufferSize = m_vertices.size() * sizeof(Vertex);
+    const size_t indexBufferSize = m_indices.size() * sizeof(uint32_t);
+    const size_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
+    const size_t materialBufferSize = m_materials.size() * sizeof(Material);
 
-    VulkanBuffer stagingBuffer = m_vk.createBuffer(vertexBufferSize + indexBufferSize + transformBufferSize,
-                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                   VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                   VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    const size_t stagingBufferSize = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize;
+
+    VulkanBuffer stagingBuffer = vulkanContext.createBuffer(stagingBufferSize,
+                                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                            VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     void *data = stagingBuffer.info.pMappedData;
 
-    m_boundedVertexBuffer = m_vk.createBuffer(vertexBufferSize,
-                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                              VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    memcpy(data, m_vertexBuffer.data(), vertexBufferSize);
+    m_boundedVertexBuffer = vulkanContext.createBuffer(vertexBufferSize,
+                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                       VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    memcpy(data, m_vertices.data(), vertexBufferSize);
 
     if (indexBufferSize != 0) {
-        m_boundedIndexBuffer = m_vk.createBuffer(indexBufferSize,
-                                                VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                 VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, m_indexBuffer.data(), indexBufferSize);
+        m_boundedIndexBuffer = vulkanContext.createBuffer(indexBufferSize,
+                                                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, m_indices.data(), indexBufferSize);
     }
 
-    m_boundedTransformBuffer = m_vk.createBuffer(transformBufferSize,
-                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                 VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize, m_transformBuffer.data(),
+    m_boundedTransformBuffer = vulkanContext.createBuffer(transformBufferSize,
+                                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize, m_transforms.data(),
            transformBufferSize);
 
-    m_vk.immediateSubmit([&](VkCommandBuffer cmd) {
+    m_boundedMaterialBuffer = vulkanContext.createBuffer(materialBufferSize,
+                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                         VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize + transformBufferSize, m_materials.data(),
+           materialBufferSize);
+
+    vulkanContext.immediateSubmit([&](VkCommandBuffer cmd) {
         VkBufferCopy vertexCopy = {0};
         vertexCopy.dstOffset = 0;
         vertexCopy.srcOffset = 0;
@@ -185,9 +216,16 @@ void Renderer::createBuffers() {
         transformCopy.size = transformBufferSize;
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_boundedTransformBuffer.buffer,
                         1, &transformCopy);
+
+        VkBufferCopy materialCopy = {0};
+        materialCopy.dstOffset = 0;
+        materialCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize;
+        materialCopy.size = materialBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_boundedMaterialBuffer.buffer,
+                        1, &materialCopy);
     });
 
-    m_vk.destroyBuffer(stagingBuffer);
+    vulkanContext.destroyBuffer(stagingBuffer);
 }
 
 void Renderer::createDrawDatas() {
@@ -198,10 +236,13 @@ void Renderer::createDrawDatas() {
                           texture_i);
     }
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        writer.updateSet(m_vk.device, bindlessDescriptorSets[frame_i]);
+        writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
     }
 
-    for (const auto &scene: scenes) {
+    for (const auto &sceneData: m_scenes) {
+        const Scene &scene = sceneData.first;
+        const SceneBufferOffsets sceneOffsets = sceneData.second;
+
         for (const auto &topLevelNode: scene.topLevelNodes) {
             std::stack<std::shared_ptr<Node> > nodeStack;
             nodeStack.push(topLevelNode);
@@ -220,17 +261,20 @@ void Renderer::createDrawDatas() {
                     for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
                         DrawData drawData = {};
                         drawData.hasIndices = meshPrimitive.hasIndices;
-                        drawData.indexOffset = meshPrimitive.indexStart;
-                        drawData.vertexOffset = meshPrimitive.vertexStart;
+                        drawData.indexOffset = meshPrimitive.indexStart + sceneOffsets.indexOffset;
+                        drawData.vertexOffset = meshPrimitive.vertexStart + sceneOffsets.vertexOffset;
                         drawData.indexCount = meshPrimitive.indexCount;
                         drawData.vertexCount = meshPrimitive.vertexCount;
-                        //todo: support multiple scenes
-                        drawData.textureOffset = meshPrimitive.material->baseTextureOffset;
-                        drawData.transformOffset = m_transformBuffer.size();
+                        if (meshPrimitive.materialOffset == UINT32_MAX) {
+                            drawData.materialOffset = 0; // default material at index 0
+                        } else {
+                            drawData.materialOffset = meshPrimitive.materialOffset + sceneOffsets.materialOffset;
+                        }
+                        drawData.transformOffset = m_transforms.size();
 
                         drawDatas.emplace_back(drawData);
                     }
-                    m_transformBuffer.emplace_back(currentNode->worldTransform);
+                    m_transforms.emplace_back(currentNode->worldTransform);
                 }
 
                 for (const auto &child: currentNode->children) {
@@ -242,13 +286,13 @@ void Renderer::createDrawDatas() {
 }
 
 void Renderer::setupVulkan() {
-    m_vk.windowExtent = {1920, 1080};
-    m_vk.init();
+    vulkanContext.windowExtent = {1920, 1080};
+    vulkanContext.init();
 
-    glfwSetWindowUserPointer(m_vk.window, &m_camera);
-    glfwSetCursorPosCallback(m_vk.window, Camera::mouseCallback);
-    glfwSetKeyCallback(m_vk.window, Camera::keyCallback);
-    glfwSetMouseButtonCallback(m_vk.window, Camera::mouseButtonCallback);
+    glfwSetWindowUserPointer(vulkanContext.window, &m_camera);
+    glfwSetCursorPosCallback(vulkanContext.window, Camera::mouseCallback);
+    glfwSetKeyCallback(vulkanContext.window, Camera::keyCallback);
+    glfwSetMouseButtonCallback(vulkanContext.window, Camera::mouseButtonCallback);
 
     DescriptorLayoutBuilder descriptorLayoutBuilder;
     descriptorLayoutBuilder.addBinding(UNIFORM_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -267,7 +311,7 @@ void Renderer::setupVulkan() {
     bindFlags.pBindingFlags = flagArray.data();
     descriptorLayoutBuilder.bindings[TEXTURE_BINDING].descriptorCount = MAX_TEXTURES;
 
-    globalDescriptorLayout = descriptorLayoutBuilder.build(m_vk.device,
+    globalDescriptorLayout = descriptorLayoutBuilder.build(vulkanContext.device,
                                                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                                            &bindFlags,
                                                            VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
@@ -278,9 +322,9 @@ void Renderer::setupVulkan() {
     };
 
     globalDescriptors = DescriptorAllocator();
-    globalDescriptors.init(m_vk.device, 1024, frameSizes, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
+    globalDescriptors.init(vulkanContext.device, 1024, frameSizes, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        bindlessDescriptorSets[frame_i] = globalDescriptors.allocate(m_vk.device, globalDescriptorLayout);
+        bindlessDescriptorSets[frame_i] = globalDescriptors.allocate(vulkanContext.device, globalDescriptorLayout);
     }
 
     VkPushConstantRange pushConstantsRange = {};
@@ -294,11 +338,11 @@ void Renderer::setupVulkan() {
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantsRange;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
 
-    VK_CHECK(vkCreatePipelineLayout(m_vk.device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout))
+    VK_CHECK(vkCreatePipelineLayout(vulkanContext.device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout))
 
     VkShaderModule triangleVertShader, triangleFragShader;
-    VK_CHECK(m_vk.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
-    VK_CHECK(m_vk.createShaderModule("shaders/texture_bindless.frag.spv", &triangleFragShader))
+    VK_CHECK(vulkanContext.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
+    VK_CHECK(vulkanContext.createShaderModule("shaders/texture_bindless.frag.spv", &triangleFragShader))
 
     PipelineBuilder trianglePipelineBuilder;
     trianglePipelineBuilder
@@ -310,64 +354,72 @@ void Renderer::setupVulkan() {
             .setMultisamplingNone()
             .disableBlending()
             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL)
-            .setColorAttachmentFormat(m_vk.drawImage.imageFormat)
-            .setDepthAttachmentFormat(m_vk.depthImage.imageFormat);
+            .setColorAttachmentFormat(vulkanContext.drawImage.imageFormat)
+            .setDepthAttachmentFormat(vulkanContext.depthImage.imageFormat);
 
-    trianglePipeline = trianglePipelineBuilder.build(m_vk.device);
+    trianglePipeline = trianglePipelineBuilder.build(vulkanContext.device);
 
-    vkDestroyShaderModule(m_vk.device, triangleVertShader, nullptr);
-    vkDestroyShaderModule(m_vk.device, triangleFragShader, nullptr);
+    vkDestroyShaderModule(vulkanContext.device, triangleVertShader, nullptr);
+    vkDestroyShaderModule(vulkanContext.device, triangleFragShader, nullptr);
 
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        m_uniformBuffers[frame_i] = m_vk.createBuffer(sizeof(GlobalUniformData),
-                                                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                      VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        m_uniformBuffers[frame_i] = vulkanContext.createBuffer(sizeof(GlobalUniformData),
+                                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                               VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     }
-    m_boundedUniformBuffer = m_vk.createBuffer(sizeof(GlobalUniformData),
-                                                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                  VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    m_boundedUniformBuffer = vulkanContext.createBuffer(sizeof(GlobalUniformData),
+                                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+
+    initDefaultData();
 }
 
 void Renderer::terminateVulkan() {
-    vkDeviceWaitIdle(m_vk.device);
+    vkDeviceWaitIdle(vulkanContext.device);
 
-    for (auto &scene: scenes) {
-        scene.clear();
+    for (auto &scene: m_scenes) {
+        scene.first.clear();
     }
 
-    globalDescriptors.destroyPools(m_vk.device);
+    vulkanContext.destroyImage(defaultTextureImage);
+    vkDestroySampler(vulkanContext.device, defaultSampler, nullptr);
 
-    if (!m_indexBuffer.empty()) {
-        m_vk.destroyBuffer(m_boundedIndexBuffer);
+    globalDescriptors.destroyPools(vulkanContext.device);
+
+    if (!m_indices.empty()) {
+        vulkanContext.destroyBuffer(m_boundedIndexBuffer);
     }
-    m_vk.destroyBuffer(m_boundedVertexBuffer);
-    m_vk.destroyBuffer(m_boundedTransformBuffer);
+    vulkanContext.destroyBuffer(m_boundedVertexBuffer);
+    vulkanContext.destroyBuffer(m_boundedTransformBuffer);
+    vulkanContext.destroyBuffer(m_boundedMaterialBuffer);
 
     for (auto &uniformBuffer: m_uniformBuffers) {
-        m_vk.destroyBuffer(uniformBuffer);
+        vulkanContext.destroyBuffer(uniformBuffer);
     }
-    m_vk.destroyBuffer(m_boundedUniformBuffer);
+    vulkanContext.destroyBuffer(m_boundedUniformBuffer);
 
-    vkDestroyDescriptorSetLayout(m_vk.device, globalDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(vulkanContext.device, globalDescriptorLayout, nullptr);
 
-    vkDestroyPipelineLayout(m_vk.device, trianglePipelineLayout, nullptr);
-    vkDestroyPipeline(m_vk.device, trianglePipeline, nullptr);
+    vkDestroyPipelineLayout(vulkanContext.device, trianglePipelineLayout, nullptr);
+    vkDestroyPipeline(vulkanContext.device, trianglePipeline, nullptr);
 
-    m_vk.terminate();
+    vulkanContext.terminate();
 }
 
 void Renderer::drawGeometry(VkCommandBuffer cmd) {
     VkRenderingAttachmentInfo colorAttachment = {};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = m_vk.drawImage.imageView;
+    colorAttachment.imageView = vulkanContext.drawImage.imageView;
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
     VkRenderingAttachmentInfo depthAttachment = {};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = m_vk.depthImage.imageView;
+    depthAttachment.imageView = vulkanContext.depthImage.imageView;
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -376,16 +428,16 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     VkViewport viewport = {};
     viewport.x = 0;
     viewport.y = 0;
-    viewport.width = m_vk.windowExtent.width;
-    viewport.height = m_vk.windowExtent.height;
+    viewport.width = static_cast<float>(vulkanContext.windowExtent.width);
+    viewport.height = static_cast<float>(vulkanContext.windowExtent.height);
     viewport.minDepth = 0.f;
     viewport.maxDepth = 1.f;
 
     VkRect2D scissor = {};
     scissor.offset.x = 0;
     scissor.offset.y = 0;
-    scissor.extent.width = m_vk.windowExtent.width;
-    scissor.extent.height = m_vk.windowExtent.height;
+    scissor.extent.width = vulkanContext.windowExtent.width;
+    scissor.extent.height = vulkanContext.windowExtent.height;
 
     glm::mat4 view = m_camera.getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
@@ -401,7 +453,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     DescriptorWriter writer;
     writer.writeBuffer(0, m_boundedUniformBuffer.buffer, sizeof(GlobalUniformData), 0,
                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    writer.updateSet(m_vk.device, bindlessDescriptorSets[currentFrame]);
+    writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkBufferCopy uniformCopy = {0};
     uniformCopy.dstOffset = 0;
@@ -410,7 +462,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     vkCmdCopyBuffer(cmd, m_uniformBuffers[currentFrame].buffer, m_boundedUniformBuffer.buffer,
                     1, &uniformCopy);
 
-    VkRenderingInfo renderInfo = VkInit::renderingInfo(m_vk.windowExtent, &colorAttachment, &depthAttachment);
+    VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
 
     auto start = std::chrono::system_clock::now();
@@ -421,15 +473,18 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipelineLayout,
                             0, 1, &bindlessDescriptorSets[currentFrame], 0, nullptr);
-    vkCmdBindIndexBuffer(cmd, m_boundedIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    if (!m_indices.empty()) {
+        vkCmdBindIndexBuffer(cmd, m_boundedIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    }
 
     PushConstantsBindless pcb = {};
-    pcb.vertexBuffer = m_vk.getBufferAddress(m_boundedVertexBuffer);
-    pcb.transformBuffer = m_vk.getBufferAddress(m_boundedTransformBuffer);
+    pcb.vertexBuffer = vulkanContext.getBufferAddress(m_boundedVertexBuffer);
+    pcb.transformBuffer = vulkanContext.getBufferAddress(m_boundedTransformBuffer);
+    pcb.materialBuffer = vulkanContext.getBufferAddress(m_boundedMaterialBuffer);
 
     for (const auto &drawData: drawDatas) {
         pcb.transformOffset = drawData.transformOffset;
-        pcb.textureOffset = drawData.textureOffset;
+        pcb.materialOffset = drawData.materialOffset;
 
         vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                            sizeof(PushConstantsBindless),
@@ -448,3 +503,43 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     vkCmdEndRendering(cmd);
 }
+
+void Renderer::initDefaultData() {
+    uint32_t black = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
+    uint32_t magenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
+    std::array<uint32_t, 8 * 8> checker = {};
+    for (size_t x = 0; x < 8; x++) {
+        for (size_t y = 0; y < 8; y++) {
+            checker[y * 8 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+        }
+    }
+
+    defaultTextureImage = vulkanContext.createImage(checker.data(), VkExtent3D(8, 8, 1),
+                                                    VK_FORMAT_R8G8B8A8_UNORM,
+                                                    VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+    VkSamplerCreateInfo samplerInfo = {};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+
+    vkCreateSampler(vulkanContext.device, &samplerInfo, nullptr, &defaultSampler);
+
+    Texture defaultTexture = {
+            "default_texture",
+            defaultTextureImage.imageView,
+            defaultSampler
+    };
+
+    m_textures.emplace_back(std::make_shared<Texture>(defaultTexture));
+
+    Material defaultMaterial = {
+            .baseColorFactor = {1.f, 1.f, 1.f, 1.f},
+            .metallicFactor = 1.f,
+            .roughnessFactor = 1.f,
+            .baseTextureOffset = 0,  // the default texture is at index 0
+    };
+
+    m_materials.emplace_back(defaultMaterial);
+}
+
