@@ -35,4 +35,13 @@ namespace VkInit {
 
     VkCommandBufferAllocateInfo commandBufferAllocateInfo(VkCommandPool pool, uint32_t count);
 
+    VkRenderingAttachmentInfo attachmentInfo(VkImageView imageView,
+                                             VkClearValue *clearValue,
+                                             VkImageLayout imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView imageView, float clearDepth = 1.f,
+                                                  VkImageLayout layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+    VkViewport viewport(float width, float height);
+
 }

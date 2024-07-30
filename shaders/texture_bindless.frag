@@ -54,5 +54,5 @@ layout(push_constant) uniform constants
 void main()
 {
     Material material = pc.materialBuffer.materials[pc.materialOffset];
-    outFragColor = texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
+    outFragColor = material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
 }

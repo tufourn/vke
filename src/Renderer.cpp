@@ -123,32 +123,95 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
     Scene scene(this);
     scene.load(filePath);
 
-    SceneBufferOffsets sceneOffsets = {};
+    if (!scene.loaded) {
+        return;
+    }
 
-    sceneOffsets.indexOffset = m_indices.size();
-    m_indices.insert(m_indices.end(), scene.indexBuffer.begin(), scene.indexBuffer.end());
+    SceneData sceneData = {};
 
-    sceneOffsets.vertexOffset = m_vertices.size();
+    sceneData.vertexOffset = m_vertices.size();
     m_vertices.insert(m_vertices.end(), scene.vertexBuffer.begin(), scene.vertexBuffer.end());
 
-    sceneOffsets.textureOffset = m_textures.size();
+    sceneData.indexOffset = m_indices.size();
+    m_indices.insert(m_indices.end(), scene.indexBuffer.begin(), scene.indexBuffer.end());
+
+    // make sure index points to the right vertex
+    for (size_t index_i = sceneData.indexOffset; index_i < m_indices.size(); index_i++) {
+        m_indices[index_i] += sceneData.vertexOffset;
+    }
+
+    sceneData.textureOffset = m_textures.size();
     m_textures.insert(m_textures.end(), scene.textures.begin(), scene.textures.end());
 
-    sceneOffsets.materialOffset = m_materials.size();
+    sceneData.materialOffset = m_materials.size();
     m_materials.insert(m_materials.end(), scene.materials.begin(), scene.materials.end());
 
     // make sure material points to the right texture
-    for (size_t material_i = sceneOffsets.materialOffset; material_i < m_materials.size(); material_i++) {
-        m_materials[material_i].baseTextureOffset += sceneOffsets.textureOffset;
+    for (size_t material_i = sceneData.materialOffset; material_i < m_materials.size(); material_i++) {
+        if (m_materials[material_i].baseTextureOffset == OPAQUE_WHITE_TEXTURE) {
+            m_materials[material_i].baseTextureOffset = 0; // opaque white texture at index 0
+        } else {
+            m_materials[material_i].baseTextureOffset += sceneData.textureOffset;
+        }
     }
 
-    m_scenes.emplace_back(scene, sceneOffsets);
+    for (const auto &topLevelNode: scene.topLevelNodes) {
+        std::stack<std::shared_ptr<Node> > nodeStack;
+        nodeStack.push(topLevelNode);
 
-    createDrawDatas();
-    createBuffers();
+        while (!nodeStack.empty()) {
+            auto currentNode = nodeStack.top();
+            nodeStack.pop();
+
+            if (auto parentNode = currentNode->parent.lock()) {
+                currentNode->worldTransform = parentNode->worldTransform * currentNode->localTransform;
+            } else {
+                currentNode->worldTransform = currentNode->localTransform;
+            }
+
+            if (const auto &nodeMesh = currentNode->mesh) {
+                for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
+                    DrawData drawData = {};
+                    drawData.hasIndices = meshPrimitive.hasIndices;
+                    drawData.indexOffset = meshPrimitive.indexStart + sceneData.indexOffset;
+                    drawData.vertexOffset = meshPrimitive.vertexStart + sceneData.vertexOffset;
+                    drawData.indexCount = meshPrimitive.indexCount;
+                    drawData.vertexCount = meshPrimitive.vertexCount;
+                    if (meshPrimitive.materialOffset == DEFAULT_MATERIAL) {
+                        drawData.materialOffset = 0; // default material at index 0
+                    } else {
+                        drawData.materialOffset = meshPrimitive.materialOffset + sceneData.materialOffset;
+                    }
+                    drawData.transformOffset = m_transforms.size();
+
+                    sceneData.drawDatas.emplace_back(drawData);
+                }
+                m_transforms.emplace_back(currentNode->worldTransform);
+            }
+
+            for (const auto &child: currentNode->children) {
+                nodeStack.push(child);
+            }
+        }
+    }
+
+    DescriptorWriter writer;
+    for (size_t texture_i = sceneData.textureOffset; texture_i < m_textures.size(); texture_i++) {
+        writer.writeImage(TEXTURE_BINDING, m_textures[texture_i]->imageview, m_textures[texture_i]->sampler,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                          texture_i);
+    }
+    for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
+        writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
+    }
+
+    m_scenes.emplace_back(scene, sceneData);
+
+    destroyStaticBuffers();
+    createStaticBuffers();
 }
 
-void Renderer::createBuffers() {
+void Renderer::createStaticBuffers() {
     const size_t vertexBufferSize = m_vertices.size() * sizeof(Vertex);
     const size_t indexBufferSize = m_indices.size() * sizeof(uint32_t);
     const size_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
@@ -228,63 +291,6 @@ void Renderer::createBuffers() {
     vulkanContext.destroyBuffer(stagingBuffer);
 }
 
-void Renderer::createDrawDatas() {
-    DescriptorWriter writer;
-    for (size_t texture_i = 0; texture_i < m_textures.size(); texture_i++) {
-        writer.writeImage(TEXTURE_BINDING, m_textures[texture_i]->imageview, m_textures[texture_i]->sampler,
-                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                          texture_i);
-    }
-    for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
-    }
-
-    for (const auto &sceneData: m_scenes) {
-        const Scene &scene = sceneData.first;
-        const SceneBufferOffsets sceneOffsets = sceneData.second;
-
-        for (const auto &topLevelNode: scene.topLevelNodes) {
-            std::stack<std::shared_ptr<Node> > nodeStack;
-            nodeStack.push(topLevelNode);
-
-            while (!nodeStack.empty()) {
-                auto currentNode = nodeStack.top();
-                nodeStack.pop();
-
-                if (auto parentNode = currentNode->parent.lock()) {
-                    currentNode->worldTransform = parentNode->worldTransform * currentNode->localTransform;
-                } else {
-                    currentNode->worldTransform = currentNode->localTransform;
-                }
-
-                if (const auto &nodeMesh = currentNode->mesh) {
-                    for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
-                        DrawData drawData = {};
-                        drawData.hasIndices = meshPrimitive.hasIndices;
-                        drawData.indexOffset = meshPrimitive.indexStart + sceneOffsets.indexOffset;
-                        drawData.vertexOffset = meshPrimitive.vertexStart + sceneOffsets.vertexOffset;
-                        drawData.indexCount = meshPrimitive.indexCount;
-                        drawData.vertexCount = meshPrimitive.vertexCount;
-                        if (meshPrimitive.materialOffset == UINT32_MAX) {
-                            drawData.materialOffset = 0; // default material at index 0
-                        } else {
-                            drawData.materialOffset = meshPrimitive.materialOffset + sceneOffsets.materialOffset;
-                        }
-                        drawData.transformOffset = m_transforms.size();
-
-                        drawDatas.emplace_back(drawData);
-                    }
-                    m_transforms.emplace_back(currentNode->worldTransform);
-                }
-
-                for (const auto &child: currentNode->children) {
-                    nodeStack.push(child);
-                }
-            }
-        }
-    }
-}
-
 void Renderer::setupVulkan() {
     vulkanContext.windowExtent = {1920, 1080};
     vulkanContext.init();
@@ -362,17 +368,18 @@ void Renderer::setupVulkan() {
     vkDestroyShaderModule(vulkanContext.device, triangleVertShader, nullptr);
     vkDestroyShaderModule(vulkanContext.device, triangleFragShader, nullptr);
 
+    m_uniformBuffer = vulkanContext.createBuffer(sizeof(GlobalUniformData),
+                                                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                 VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        m_uniformBuffers[frame_i] = vulkanContext.createBuffer(sizeof(GlobalUniformData),
-                                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                               VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        m_boundedUniformBuffers[frame_i] = vulkanContext.createBuffer(sizeof(GlobalUniformData),
+                                                                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                      VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
-    m_boundedUniformBuffer = vulkanContext.createBuffer(sizeof(GlobalUniformData),
-                                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
 
     initDefaultData();
 }
@@ -384,22 +391,19 @@ void Renderer::terminateVulkan() {
         scene.first.clear();
     }
 
-    vulkanContext.destroyImage(defaultTextureImage);
+    vulkanContext.destroyImage(errorTextureImage);
+    vulkanContext.destroyImage(opaqueWhiteTextureImage);
     vkDestroySampler(vulkanContext.device, defaultSampler, nullptr);
 
     globalDescriptors.destroyPools(vulkanContext.device);
 
-    if (!m_indices.empty()) {
-        vulkanContext.destroyBuffer(m_boundedIndexBuffer);
-    }
-    vulkanContext.destroyBuffer(m_boundedVertexBuffer);
-    vulkanContext.destroyBuffer(m_boundedTransformBuffer);
-    vulkanContext.destroyBuffer(m_boundedMaterialBuffer);
+    destroyStaticBuffers();
 
-    for (auto &uniformBuffer: m_uniformBuffers) {
-        vulkanContext.destroyBuffer(uniformBuffer);
+    vulkanContext.destroyBuffer(m_uniformBuffer);
+
+    for (auto &boundedUniformBuffer: m_boundedUniformBuffers) {
+        vulkanContext.destroyBuffer(boundedUniformBuffer);
     }
-    vulkanContext.destroyBuffer(m_boundedUniformBuffer);
 
     vkDestroyDescriptorSetLayout(vulkanContext.device, globalDescriptorLayout, nullptr);
 
@@ -410,28 +414,10 @@ void Renderer::terminateVulkan() {
 }
 
 void Renderer::drawGeometry(VkCommandBuffer cmd) {
-    VkRenderingAttachmentInfo colorAttachment = {};
-    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = vulkanContext.drawImage.imageView;
-    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(vulkanContext.drawImage.imageView, nullptr);
+    VkRenderingAttachmentInfo depthAttachment = VkInit::depthAttachmentInfo(vulkanContext.depthImage.imageView);
 
-    VkRenderingAttachmentInfo depthAttachment = {};
-    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = vulkanContext.depthImage.imageView;
-    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.clearValue.depthStencil.depth = 1.f;
-
-    VkViewport viewport = {};
-    viewport.x = 0;
-    viewport.y = 0;
-    viewport.width = static_cast<float>(vulkanContext.windowExtent.width);
-    viewport.height = static_cast<float>(vulkanContext.windowExtent.height);
-    viewport.minDepth = 0.f;
-    viewport.maxDepth = 1.f;
+    VkViewport viewport = VkInit::viewport(vulkanContext.windowExtent.width, vulkanContext.windowExtent.height);
 
     VkRect2D scissor = {};
     scissor.offset.x = 0;
@@ -447,20 +433,20 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     m_globalUniformData.proj = projection;
     m_globalUniformData.projView = projection * view;
 
-    GlobalUniformData *globalUniformData = static_cast<GlobalUniformData *>(m_uniformBuffers[currentFrame].info.pMappedData);
+    GlobalUniformData *globalUniformData = static_cast<GlobalUniformData *>(m_uniformBuffer.info.pMappedData);
     *globalUniformData = m_globalUniformData;
-
-    DescriptorWriter writer;
-    writer.writeBuffer(0, m_boundedUniformBuffer.buffer, sizeof(GlobalUniformData), 0,
-                       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkBufferCopy uniformCopy = {0};
     uniformCopy.dstOffset = 0;
     uniformCopy.srcOffset = 0;
     uniformCopy.size = sizeof(GlobalUniformData);
-    vkCmdCopyBuffer(cmd, m_uniformBuffers[currentFrame].buffer, m_boundedUniformBuffer.buffer,
+    vkCmdCopyBuffer(cmd, m_uniformBuffer.buffer, m_boundedUniformBuffers[currentFrame].buffer,
                     1, &uniformCopy);
+
+    DescriptorWriter writer;
+    writer.writeBuffer(0, m_boundedUniformBuffers[currentFrame].buffer, sizeof(GlobalUniformData), 0,
+                       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
@@ -482,17 +468,20 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     pcb.transformBuffer = vulkanContext.getBufferAddress(m_boundedTransformBuffer);
     pcb.materialBuffer = vulkanContext.getBufferAddress(m_boundedMaterialBuffer);
 
-    for (const auto &drawData: drawDatas) {
-        pcb.transformOffset = drawData.transformOffset;
-        pcb.materialOffset = drawData.materialOffset;
+    for (const auto &scene: m_scenes) {
+        for (const auto &drawData: scene.second.drawDatas) {
+            pcb.transformOffset = drawData.transformOffset;
+            pcb.materialOffset = drawData.materialOffset;
 
-        vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                           sizeof(PushConstantsBindless),
-                           &pcb);
-        if (drawData.hasIndices) {
-            vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
-        } else {
-            vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
+            vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0,
+                               sizeof(PushConstantsBindless),
+                               &pcb);
+            if (drawData.hasIndices) {
+                vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
+            } else {
+                vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
+            }
         }
     }
 
@@ -505,8 +494,13 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 }
 
 void Renderer::initDefaultData() {
+    m_textures.clear();
+    m_materials.clear();
+
+    uint32_t opaqueWhite = glm::packUnorm4x8(glm::vec4(1.f, 1.f, 1.f, 1.f));
     uint32_t black = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
     uint32_t magenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
+
     std::array<uint32_t, 8 * 8> checker = {};
     for (size_t x = 0; x < 8; x++) {
         for (size_t y = 0; y < 8; y++) {
@@ -514,9 +508,13 @@ void Renderer::initDefaultData() {
         }
     }
 
-    defaultTextureImage = vulkanContext.createImage(checker.data(), VkExtent3D(8, 8, 1),
-                                                    VK_FORMAT_R8G8B8A8_UNORM,
-                                                    VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    errorTextureImage = vulkanContext.createImage(checker.data(), VkExtent3D(8, 8, 1),
+                                                  VK_FORMAT_R8G8B8A8_UNORM,
+                                                  VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+    opaqueWhiteTextureImage = vulkanContext.createImage(&opaqueWhite, VkExtent3D(1, 1, 1),
+                                                        VK_FORMAT_R8G8B8A8_UNORM,
+                                                        VK_IMAGE_USAGE_SAMPLED_BIT, false);
 
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -525,21 +523,53 @@ void Renderer::initDefaultData() {
 
     vkCreateSampler(vulkanContext.device, &samplerInfo, nullptr, &defaultSampler);
 
-    Texture defaultTexture = {
-            "default_texture",
-            defaultTextureImage.imageView,
+    Texture opaqueWhiteTexture = {
+            "opaque_white_texture",
+            opaqueWhiteTextureImage.imageView,
             defaultSampler
     };
 
-    m_textures.emplace_back(std::make_shared<Texture>(defaultTexture));
+    Texture errorTexture = {
+            "error_missing_texture",
+            errorTextureImage.imageView,
+            defaultSampler
+    };
+
+    m_textures.emplace_back(std::make_shared<Texture>(opaqueWhiteTexture));
+    m_textures.emplace_back(std::make_shared<Texture>(errorTexture));
 
     Material defaultMaterial = {
             .baseColorFactor = {1.f, 1.f, 1.f, 1.f},
             .metallicFactor = 1.f,
             .roughnessFactor = 1.f,
-            .baseTextureOffset = 0,  // the default texture is at index 0
+            .baseTextureOffset = 0,  // the default opaque white texture is at index 0
     };
 
     m_materials.emplace_back(defaultMaterial);
+
+    DescriptorWriter writer;
+    for (size_t texture_i = 0; texture_i < m_textures.size(); texture_i++) {
+        writer.writeImage(TEXTURE_BINDING, m_textures[texture_i]->imageview, m_textures[texture_i]->sampler,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                          texture_i);
+    }
+    for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
+        writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
+    }
+}
+
+void Renderer::destroyStaticBuffers() {
+    if (m_boundedIndexBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_boundedIndexBuffer);
+    }
+    if (m_boundedVertexBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_boundedVertexBuffer);
+    }
+    if (m_boundedTransformBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_boundedTransformBuffer);
+    }
+    if (m_boundedMaterialBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_boundedMaterialBuffer);
+    }
 }
 

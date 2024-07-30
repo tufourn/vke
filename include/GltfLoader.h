@@ -8,6 +8,9 @@
 #include "VulkanContext.h"
 #include "VulkanTypes.h"
 
+constexpr uint32_t DEFAULT_MATERIAL = UINT32_MAX;
+constexpr uint32_t OPAQUE_WHITE_TEXTURE = UINT32_MAX;
+
 class Renderer;
 
 struct Node {

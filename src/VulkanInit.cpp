@@ -161,4 +161,44 @@ namespace VkInit {
         return info;
     }
 
+    VkRenderingAttachmentInfo attachmentInfo(VkImageView imageView,
+                                             VkClearValue *clearValue,
+                                             VkImageLayout imageLayout) {
+        VkRenderingAttachmentInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        info.imageView = imageView;
+        info.imageLayout = imageLayout;
+        info.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        if (clearValue) {
+            info.clearValue = *clearValue;
+        }
+
+        return info;
+    }
+
+    VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView imageView, float clearDepth, VkImageLayout layout) {
+        VkRenderingAttachmentInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        info.imageView = imageView;
+        info.imageLayout = layout;
+        info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        info.clearValue.depthStencil.depth = clearDepth;
+
+        return info;
+    }
+
+    VkViewport viewport(float width, float height) {
+        VkViewport viewport = {};
+        viewport.x = 0;
+        viewport.y = 0;
+        viewport.width = width;
+        viewport.height = height;
+        viewport.minDepth = 0.f;
+        viewport.maxDepth = 1.f;
+
+        return viewport;
+    }
+
 }

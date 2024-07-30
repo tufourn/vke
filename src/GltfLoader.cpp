@@ -20,6 +20,8 @@ void Scene::parseTextures(const cgltf_data *data) {
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.minFilter = extractGltfMinFilter(gltfSampler->min_filter);
         samplerInfo.magFilter = extractGltfMagFilter(gltfSampler->mag_filter);
+        samplerInfo.addressModeU = extractGltfWrapMode(gltfSampler->wrap_s);
+        samplerInfo.addressModeV = extractGltfWrapMode(gltfSampler->wrap_t);
 
         VkSampler sampler;
         vkCreateSampler(renderer->vulkanContext.device, &samplerInfo, nullptr, &sampler);
@@ -38,7 +40,8 @@ void Scene::parseTextures(const cgltf_data *data) {
         if (images[imageIndex].has_value()) {
             texture.imageview = images[imageIndex].value().imageView;
         } else {
-            texture.imageview = renderer->defaultTextureImage.imageView;
+            // if image can't be loaded, use the error checkerboard texture
+            texture.imageview = renderer->errorTextureImage.imageView;
         }
 
         if (gltfTexture->sampler && data->samplers) {
@@ -71,8 +74,10 @@ void Scene::parseMaterials(const cgltf_data *data) {
             material.roughnessFactor = gltfMetallicRoughness->roughness_factor;
 
             const cgltf_texture_view *baseColorTextureView = &gltfMaterial->pbr_metallic_roughness.base_color_texture;
-            if (baseColorTextureView) {
+            if (baseColorTextureView && baseColorTextureView->texture) {
                 material.baseTextureOffset = baseColorTextureView->texture - data->textures;
+            } else {
+                material.baseTextureOffset = OPAQUE_WHITE_TEXTURE;
             }
         }
 
@@ -148,13 +153,13 @@ void Scene::load(std::filesystem::path filePath) {
     cgltf_result result = cgltf_parse_file(&options, path.string().c_str(), &data);
     if (result != cgltf_result_success) {
         std::cerr << "Failed to load GLTF file: " << path <<
-                " Error: " << result << std::endl;
+                  " Error: " << result << std::endl;
         return;
     }
     result = cgltf_load_buffers(&options, data, path.string().c_str());
     if (result != cgltf_result_success) {
         std::cerr << "Failed to load buffers from file: " << path <<
-                " Error: " << result << std::endl;
+                  " Error: " << result << std::endl;
         return;
     }
 
@@ -168,6 +173,7 @@ void Scene::load(std::filesystem::path filePath) {
     loaded = true;
 }
 
+// todo: right now it's easiest to have scenes manage their own allocated images, but it might be a better idea to move this stuff inside the renderer class
 void Scene::parseImages(const cgltf_data *data) {
     std::filesystem::path directory = path.parent_path();
 
@@ -201,8 +207,8 @@ void Scene::parseImages(const cgltf_data *data) {
                     }
 
                     unsigned char *stbData = stbi_load_from_memory(
-                        static_cast<const unsigned char *>(imageData), decodedBinarySize, &width, &height,
-                        &numChannels, 4);
+                            static_cast<const unsigned char *>(imageData), decodedBinarySize, &width, &height,
+                            &numChannels, 4);
 
                     VkExtent3D imageExtent;
                     imageExtent.width = width;
@@ -210,8 +216,8 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.depth = 1;
 
                     newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
-                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                    false);
+                                                                   VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                                   false);
 
                     images.emplace_back(newImage);
 
@@ -233,8 +239,8 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.depth = 1;
 
                     newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
-                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                    false);
+                                                                   VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                                   false);
 
                     images.emplace_back(newImage);
 
@@ -311,8 +317,8 @@ void Scene::parseMesh(const cgltf_data *data) {
             }
 
             assert(positionBuffer &&
-                (!normalBuffer || normalAccessor->count == positionAccessor->count) &&
-                (!uvBuffer || uvAccessor->count == positionAccessor->count)
+                           (!normalBuffer || normalAccessor->count == positionAccessor->count) &&
+                           (!uvBuffer || uvAccessor->count == positionAccessor->count)
             );
 
             for (size_t vertex_i = 0; vertex_i < vertexCount; vertex_i++) {
@@ -385,7 +391,7 @@ void Scene::parseMesh(const cgltf_data *data) {
             if (gltfPrimitive->material) {
                 newPrimitive.materialOffset = gltfPrimitive->material - data->materials;
             } else {
-                newPrimitive.materialOffset = UINT32_MAX; // default material
+                newPrimitive.materialOffset = DEFAULT_MATERIAL;
             }
 
             newPrimitive.indexCount = indexCount;
@@ -411,10 +417,10 @@ void Scene::parseNodes(const cgltf_data *data) {
         }
 
         glm::mat4 translation = glm::translate(glm::mat4(1.f), {
-                                                   gltfNode.translation[0],
-                                                   gltfNode.translation[1],
-                                                   gltfNode.translation[2]
-                                               });
+                gltfNode.translation[0],
+                gltfNode.translation[1],
+                gltfNode.translation[2]
+        });
 
         glm::quat rotation = glm::quat(gltfNode.rotation[3],
                                        gltfNode.rotation[0],
@@ -422,10 +428,10 @@ void Scene::parseNodes(const cgltf_data *data) {
                                        gltfNode.rotation[2]);
 
         glm::mat4 scale = glm::scale(glm::mat4(1.f), {
-                                         gltfNode.scale[0],
-                                         gltfNode.scale[1],
-                                         gltfNode.scale[2]
-                                     });
+                gltfNode.scale[0],
+                gltfNode.scale[1],
+                gltfNode.scale[2]
+        });
 
         newNode->localTransform = translation * glm::toMat4(rotation) * scale;
 

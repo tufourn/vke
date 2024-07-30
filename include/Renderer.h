@@ -18,13 +18,6 @@ struct PushConstantsBindless {
     float pad0[3];
 };
 
-struct SceneBufferOffsets {
-    uint32_t indexOffset;
-    uint32_t vertexOffset;
-    uint32_t textureOffset;
-    uint32_t materialOffset;
-};
-
 struct DrawData {
     bool hasIndices;
     uint32_t indexOffset;
@@ -33,6 +26,14 @@ struct DrawData {
     uint32_t indexCount;
     uint32_t vertexCount;
     uint32_t materialOffset;
+};
+
+struct SceneData {
+    uint32_t indexOffset;
+    uint32_t vertexOffset;
+    uint32_t textureOffset;
+    uint32_t materialOffset;
+    std::vector<DrawData> drawDatas;
 };
 
 struct GlobalUniformData {
@@ -53,14 +54,14 @@ public:
 
     VulkanContext vulkanContext;
 
-    VulkanImage defaultTextureImage = {};
+    VulkanImage errorTextureImage = {};
+    VulkanImage opaqueWhiteTextureImage = {};
     VkSampler defaultSampler = {};
 
 private:
     uint32_t currentFrame = 0;
 
-    std::vector<std::pair<Scene, SceneBufferOffsets>> m_scenes;
-    std::vector<DrawData> drawDatas;
+    std::vector<std::pair<Scene, SceneData>> m_scenes;
 
     VkPipeline trianglePipeline;
     VkPipelineLayout trianglePipelineLayout;
@@ -77,20 +78,20 @@ private:
     std::vector<std::shared_ptr<Texture>> m_textures;
     std::vector<Material> m_materials;
 
+    VulkanBuffer m_uniformBuffer;
+
     VulkanBuffer m_boundedVertexBuffer;
     VulkanBuffer m_boundedIndexBuffer;
     VulkanBuffer m_boundedTransformBuffer;
     VulkanBuffer m_boundedMaterialBuffer;
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
 
-    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_uniformBuffers;
     GlobalUniformData m_globalUniformData;
-    VulkanBuffer m_boundedUniformBuffer;
 
     Stats m_stats;
 
-    void createBuffers();
-
-    void createDrawDatas();
+    void destroyStaticBuffers();
+    void createStaticBuffers();
 
     void setupVulkan();
 
