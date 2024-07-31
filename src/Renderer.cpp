@@ -120,20 +120,20 @@ void Renderer::run() {
 }
 
 void Renderer::loadGltf(std::filesystem::path filePath) {
-    Scene scene(this);
-    scene.load(filePath);
+    auto scene = std::make_unique<Scene>(this);
+    scene->load(filePath);
 
-    if (!scene.loaded) {
+    if (!scene->loaded) {
         return;
     }
 
     SceneData sceneData = {};
 
     sceneData.vertexOffset = m_vertices.size();
-    m_vertices.insert(m_vertices.end(), scene.vertexBuffer.begin(), scene.vertexBuffer.end());
+    m_vertices.insert(m_vertices.end(), scene->vertexBuffer.begin(), scene->vertexBuffer.end());
 
     sceneData.indexOffset = m_indices.size();
-    m_indices.insert(m_indices.end(), scene.indexBuffer.begin(), scene.indexBuffer.end());
+    m_indices.insert(m_indices.end(), scene->indexBuffer.begin(), scene->indexBuffer.end());
 
     // make sure index points to the right vertex
     for (size_t index_i = sceneData.indexOffset; index_i < m_indices.size(); index_i++) {
@@ -141,10 +141,10 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
     }
 
     sceneData.textureOffset = m_textures.size();
-    m_textures.insert(m_textures.end(), scene.textures.begin(), scene.textures.end());
+    m_textures.insert(m_textures.end(), scene->textures.begin(), scene->textures.end());
 
     sceneData.materialOffset = m_materials.size();
-    m_materials.insert(m_materials.end(), scene.materials.begin(), scene.materials.end());
+    m_materials.insert(m_materials.end(), scene->materials.begin(), scene->materials.end());
 
     // make sure material points to the right texture
     for (size_t material_i = sceneData.materialOffset; material_i < m_materials.size(); material_i++) {
@@ -155,7 +155,7 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         }
     }
 
-    for (const auto &topLevelNode: scene.topLevelNodes) {
+    for (const auto &topLevelNode: scene->topLevelNodes) {
         std::stack<std::shared_ptr<Node> > nodeStack;
         nodeStack.push(topLevelNode);
 
@@ -205,7 +205,7 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
     }
 
-    m_scenes.emplace_back(scene, sceneData);
+    m_scenes.emplace_back(std::move(scene), sceneData);
 
     destroyStaticBuffers();
     createStaticBuffers();
@@ -387,9 +387,8 @@ void Renderer::setupVulkan() {
 void Renderer::terminateVulkan() {
     vkDeviceWaitIdle(vulkanContext.device);
 
-    for (auto &scene: m_scenes) {
-        scene.first.clear();
-    }
+    // todo: move memory allocation stuff in scene to renderer
+    m_scenes.clear();
 
     vulkanContext.destroyImage(errorTextureImage);
     vulkanContext.destroyImage(opaqueWhiteTextureImage);
@@ -414,6 +413,10 @@ void Renderer::terminateVulkan() {
 }
 
 void Renderer::drawGeometry(VkCommandBuffer cmd) {
+    if (m_vertices.empty()) {
+        return;
+    }
+
     VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(vulkanContext.drawImage.imageView, nullptr);
     VkRenderingAttachmentInfo depthAttachment = VkInit::depthAttachmentInfo(vulkanContext.depthImage.imageView);
 

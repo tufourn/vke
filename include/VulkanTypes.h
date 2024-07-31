@@ -6,6 +6,7 @@
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <string>
+#include <memory>
 
 struct VulkanFeatures {
     bool dynamicRendering = true;
@@ -41,12 +42,6 @@ struct Vertex {
     float uv_y;
 };
 
-struct GPUMeshBuffers {
-    VulkanBuffer indexBuffer;
-    VulkanBuffer vertexBuffer;
-    VkDeviceAddress vertexBufferAddress;
-};
-
 struct Texture {
     std::string name;
     VkImageView imageview;
@@ -75,3 +70,47 @@ struct Mesh {
     std::vector<MeshPrimitive> meshPrimitives;
 };
 
+struct Node {
+    std::string name;
+    std::weak_ptr<Node> parent;
+    std::vector<std::shared_ptr<Node> > children;
+
+    std::shared_ptr<Mesh> mesh;
+
+    glm::mat4 localTransform = glm::mat4(1.f);
+    glm::mat4 worldTransform = glm::mat4(1.f);
+};
+
+struct AnimationSampler {
+    enum Interpolation {
+        eLinear,
+        eStep,
+        eCubicSpline,
+    };
+
+    Interpolation interpolation;
+    std::vector<float> inputs;
+    std::vector<glm::vec4> outputs;
+};
+
+struct AnimationChannel {
+    enum Path {
+        eTranslation,
+        eRotation,
+        eScale,
+        eWeights,
+    };
+
+    Path path;
+    Node* node;
+    uint32_t samplerIndex;
+};
+
+struct Animation {
+    std::string name;
+    std::vector<AnimationSampler> samplers;
+    std::vector<AnimationChannel> channels;
+    float start = std::numeric_limits<float>::max();
+    float end = std::numeric_limits<float>::min();
+    float currentTime = 0.f;
+};

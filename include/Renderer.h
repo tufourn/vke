@@ -61,7 +61,7 @@ public:
 private:
     uint32_t currentFrame = 0;
 
-    std::vector<std::pair<Scene, SceneData>> m_scenes;
+    std::vector<std::pair<std::unique_ptr<Scene>, SceneData>> m_scenes;
 
     VkPipeline trianglePipeline;
     VkPipelineLayout trianglePipelineLayout;

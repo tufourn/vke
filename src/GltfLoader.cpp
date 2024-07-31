@@ -168,6 +168,7 @@ void Scene::load(std::filesystem::path filePath) {
     parseMaterials(data);
     parseMesh(data);
     parseNodes(data);
+    parseAnimations(data);
 
     cgltf_free(data);
     loaded = true;
@@ -453,4 +454,100 @@ void Scene::parseNodes(const cgltf_data *data) {
             topLevelNodes.push_back(node);
         }
     }
+}
+
+//todo: wip
+void Scene::parseAnimations(const cgltf_data *data) {
+    for (size_t animation_i = 0; animation_i < data->animations_count; animation_i++) {
+        const cgltf_animation *gltfAnimation = &data->animations[animation_i];
+        Animation animation = {};
+
+        if (gltfAnimation->name) {
+            animation.name = gltfAnimation->name;
+        }
+
+        for (size_t sampler_i = 0; sampler_i < gltfAnimation->samplers_count; sampler_i++) {
+            const cgltf_animation_sampler *gltfSampler = &gltfAnimation->samplers[sampler_i];
+            AnimationSampler sampler = {};
+
+            switch (gltfSampler->interpolation) {
+                case cgltf_interpolation_type_linear:
+                    sampler.interpolation = AnimationSampler::Interpolation::eLinear;
+                    break;
+                case cgltf_interpolation_type_step:
+                    sampler.interpolation = AnimationSampler::Interpolation::eStep;
+                    break;
+                case cgltf_interpolation_type_cubic_spline:
+                    sampler.interpolation = AnimationSampler::Interpolation::eCubicSpline;
+                    break;
+                default:
+                    sampler.interpolation = AnimationSampler::Interpolation::eLinear;
+                    break;
+            }
+
+            const cgltf_accessor *inputAccessor = gltfSampler->input;
+            const cgltf_buffer_view *inputBufferView = inputAccessor->buffer_view;
+            const auto *inputBuffer = static_cast<const std::byte *>(inputBufferView->buffer->data);
+            const auto *input = reinterpret_cast<const float *>(&inputBuffer[inputAccessor->offset +
+                                                                             inputBufferView->offset]);
+
+            for (size_t input_i = 0; input_i < inputAccessor->count; input_i++) {
+                sampler.inputs.emplace_back(input[input_i]);
+            }
+
+            const cgltf_accessor *outputAccessor = gltfSampler->output;
+            const cgltf_buffer_view *outputBufferView = outputAccessor->buffer_view;
+            const auto *outputBuffer = static_cast<const std::byte *>(outputBufferView->buffer->data);
+
+            switch (outputAccessor->type) {
+                case cgltf_type_vec3: {
+                    const auto *output = reinterpret_cast<const glm::vec3 *>(&outputBuffer[outputAccessor->offset +
+                                                                                           outputBufferView->offset]);
+                    for (size_t output_i = 0; output_i < outputAccessor->count; output_i++) {
+                        sampler.outputs.emplace_back(output[output_i], 0.f);
+                    }
+                    break;
+                }
+                case cgltf_type_vec4: {
+                    const auto *output = reinterpret_cast<const glm::vec4 *>(&outputBuffer[outputAccessor->offset +
+                                                                                           outputBufferView->offset]);
+                    for (size_t output_i = 0; output_i < outputAccessor->count; output_i++) {
+                        sampler.outputs.emplace_back(output[output_i]);
+                    }
+                    break;
+                }
+                default: {
+                    std::cout << "Invalid animation sampler output type" << std::endl;
+                    break;
+                }
+            }
+        }
+
+        for (size_t channel_i = 0; channel_i < gltfAnimation->channels_count; channel_i++) {
+            const cgltf_animation_channel *gltfChannel = &gltfAnimation->channels[channel_i];
+            AnimationChannel channel = {};
+
+            switch (gltfChannel->target_path) {
+                case cgltf_animation_path_type_rotation:
+                    channel.path = AnimationChannel::Path::eRotation;
+                    break;
+                case cgltf_animation_path_type_scale:
+                    channel.path = AnimationChannel::Path::eScale;
+                    break;
+                case cgltf_animation_path_type_translation:
+                    channel.path = AnimationChannel::Path::eTranslation;
+                    break;
+                case cgltf_animation_path_type_weights:
+                    channel.path = AnimationChannel::Path::eWeights;
+                    break;
+                default:
+                    std::cout << "Invalid animation channel path" << std::endl;
+                    break;
+            }
+        }
+    }
+}
+
+Scene::~Scene() {
+    clear();
 }

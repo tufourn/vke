@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 
+#include "Utils.h"
 #include "VulkanContext.h"
 #include "VulkanTypes.h"
 
@@ -13,20 +14,11 @@ constexpr uint32_t OPAQUE_WHITE_TEXTURE = UINT32_MAX;
 
 class Renderer;
 
-struct Node {
-    std::string name;
-    std::weak_ptr<Node> parent;
-    std::vector<std::shared_ptr<Node> > children;
-
-    std::shared_ptr<Mesh> mesh;
-
-    glm::mat4 localTransform = glm::mat4(1.f);
-    glm::mat4 worldTransform = glm::mat4(1.f);
-};
-
 struct Scene {
 public:
+    MOVABLE_ONLY(Scene);
     Scene(Renderer *renderer);
+    ~Scene();
 
     std::filesystem::path path;
 
@@ -60,6 +52,8 @@ private:
     void parseTextures(const cgltf_data *data);
 
     void parseMaterials(const cgltf_data *data);
+
+    void parseAnimations(const cgltf_data *data);
 };
 
 static VkFilter extractGltfMagFilter(int gltfMagFilter);
