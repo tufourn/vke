@@ -22,8 +22,13 @@ Renderer::~Renderer() {
 }
 
 void Renderer::run() {
+    m_timer.reset();
+
     while (!glfwWindowShouldClose(vulkanContext.window)) {
         glfwPollEvents();
+        m_timer.tick();
+        std::cout << m_timer.deltaTime() << std::endl;
+
         m_camera.update();
 
         vkWaitForFences(vulkanContext.device, 1, &vulkanContext.frames[currentFrame].renderFence, VK_TRUE, 1e9);

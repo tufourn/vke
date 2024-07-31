@@ -3,6 +3,7 @@
 #include <Camera.h>
 #include <VulkanContext.h>
 #include <GltfLoader.h>
+#include "Timer.h"
 
 struct Stats {
     float frameTime;
@@ -87,6 +88,8 @@ private:
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
 
     GlobalUniformData m_globalUniformData;
+
+    Timer m_timer;
 
     Stats m_stats;
 
