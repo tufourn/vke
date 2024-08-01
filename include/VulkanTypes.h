@@ -79,6 +79,7 @@ struct Node {
 
     std::shared_ptr<Mesh> mesh;
 
+    glm::mat4 matrix = glm::mat4(1.f);
     glm::vec3 translation;
     glm::quat rotation;
     glm::vec3 scale;
@@ -89,7 +90,7 @@ struct Node {
         glm::mat4 rotationMatrix = glm::toMat4(rotation);
         glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.f), scale);
 
-        return translationMatrix * rotationMatrix * scaleMatrix;
+        return translationMatrix * rotationMatrix * scaleMatrix * matrix;
     };
 };
 

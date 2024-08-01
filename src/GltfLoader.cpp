@@ -436,6 +436,8 @@ void Scene::parseNodes(const cgltf_data *data) {
                 gltfNode.scale[2]
         };
 
+        newNode->matrix = glm::make_mat4(gltfNode.matrix);
+
         nodes.emplace_back(newNode);
     }
 
