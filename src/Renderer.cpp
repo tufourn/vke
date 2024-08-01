@@ -11,7 +11,9 @@
 static constexpr uint32_t MAX_TEXTURES = 1024;
 
 static constexpr uint32_t UNIFORM_BINDING = 0;
-static constexpr uint32_t TEXTURE_BINDING = 1;
+static constexpr uint32_t TRANSFORM_BINDING = 1;
+static constexpr uint32_t MATERIAL_BINDING = 2;
+static constexpr uint32_t TEXTURE_BINDING = 3;
 
 Renderer::Renderer() {
     setupVulkan();
@@ -26,8 +28,9 @@ void Renderer::run() {
 
     while (!glfwWindowShouldClose(vulkanContext.window)) {
         glfwPollEvents();
+
         m_timer.tick();
-        std::cout << m_timer.deltaTime() << std::endl;
+        std::cout << "frame time: " << m_timer.deltaTime() << std::endl;
 
         m_camera.update();
 
@@ -160,46 +163,6 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         }
     }
 
-    for (const auto &topLevelNode: scene->topLevelNodes) {
-        std::stack<std::shared_ptr<Node> > nodeStack;
-        nodeStack.push(topLevelNode);
-
-        while (!nodeStack.empty()) {
-            auto currentNode = nodeStack.top();
-            nodeStack.pop();
-
-            if (auto parentNode = currentNode->parent.lock()) {
-                currentNode->worldTransform = parentNode->worldTransform * currentNode->localTransform;
-            } else {
-                currentNode->worldTransform = currentNode->localTransform;
-            }
-
-            if (const auto &nodeMesh = currentNode->mesh) {
-                for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
-                    DrawData drawData = {};
-                    drawData.hasIndices = meshPrimitive.hasIndices;
-                    drawData.indexOffset = meshPrimitive.indexStart + sceneData.indexOffset;
-                    drawData.vertexOffset = meshPrimitive.vertexStart + sceneData.vertexOffset;
-                    drawData.indexCount = meshPrimitive.indexCount;
-                    drawData.vertexCount = meshPrimitive.vertexCount;
-                    if (meshPrimitive.materialOffset == DEFAULT_MATERIAL) {
-                        drawData.materialOffset = 0; // default material at index 0
-                    } else {
-                        drawData.materialOffset = meshPrimitive.materialOffset + sceneData.materialOffset;
-                    }
-                    drawData.transformOffset = m_transforms.size();
-
-                    sceneData.drawDatas.emplace_back(drawData);
-                }
-                m_transforms.emplace_back(currentNode->worldTransform);
-            }
-
-            for (const auto &child: currentNode->children) {
-                nodeStack.push(child);
-            }
-        }
-    }
-
     DescriptorWriter writer;
     for (size_t texture_i = sceneData.textureOffset; texture_i < m_textures.size(); texture_i++) {
         writer.writeImage(TEXTURE_BINDING, m_textures[texture_i]->imageview, m_textures[texture_i]->sampler,
@@ -219,10 +182,9 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
 void Renderer::createStaticBuffers() {
     const size_t vertexBufferSize = m_vertices.size() * sizeof(Vertex);
     const size_t indexBufferSize = m_indices.size() * sizeof(uint32_t);
-    const size_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
     const size_t materialBufferSize = m_materials.size() * sizeof(Material);
 
-    const size_t stagingBufferSize = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize;
+    const size_t stagingBufferSize = vertexBufferSize + indexBufferSize + materialBufferSize;
 
     VulkanBuffer stagingBuffer = vulkanContext.createBuffer(stagingBufferSize,
                                                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -245,20 +207,12 @@ void Renderer::createStaticBuffers() {
         memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, m_indices.data(), indexBufferSize);
     }
 
-    m_boundedTransformBuffer = vulkanContext.createBuffer(transformBufferSize,
-                                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize, m_transforms.data(),
-           transformBufferSize);
-
     m_boundedMaterialBuffer = vulkanContext.createBuffer(materialBufferSize,
                                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize + transformBufferSize, m_materials.data(),
+    memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize, m_materials.data(),
            materialBufferSize);
 
     vulkanContext.immediateSubmit([&](VkCommandBuffer cmd) {
@@ -278,16 +232,9 @@ void Renderer::createStaticBuffers() {
                             1, &indexCopy);
         }
 
-        VkBufferCopy transformCopy = {0};
-        transformCopy.dstOffset = 0;
-        transformCopy.srcOffset = vertexBufferSize + indexBufferSize;
-        transformCopy.size = transformBufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_boundedTransformBuffer.buffer,
-                        1, &transformCopy);
-
         VkBufferCopy materialCopy = {0};
         materialCopy.dstOffset = 0;
-        materialCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize;
+        materialCopy.srcOffset = vertexBufferSize + indexBufferSize;
         materialCopy.size = materialBufferSize;
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_boundedMaterialBuffer.buffer,
                         1, &materialCopy);
@@ -307,9 +254,12 @@ void Renderer::setupVulkan() {
 
     DescriptorLayoutBuilder descriptorLayoutBuilder;
     descriptorLayoutBuilder.addBinding(UNIFORM_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    descriptorLayoutBuilder.addBinding(TRANSFORM_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    descriptorLayoutBuilder.addBinding(MATERIAL_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    std::array<VkDescriptorBindingFlags, 2> flagArray = {
+    std::array<VkDescriptorBindingFlags, 3> flagArray = {
+            0,
             0,
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
 //            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
@@ -328,8 +278,9 @@ void Renderer::setupVulkan() {
                                                            VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
 
     std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         2},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1},
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         1},
     };
 
     globalDescriptors = DescriptorAllocator();
@@ -404,9 +355,15 @@ void Renderer::terminateVulkan() {
     destroyStaticBuffers();
 
     vulkanContext.destroyBuffer(m_uniformBuffer);
+    vulkanContext.destroyBuffer(m_transformBuffer);
 
-    for (auto &boundedUniformBuffer: m_boundedUniformBuffers) {
-        vulkanContext.destroyBuffer(boundedUniformBuffer);
+    for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
+        if (m_boundedUniformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedUniformBuffers[frame_i]);
+        }
+        if (m_boundedTransformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedTransformBuffers[frame_i]);
+        }
     }
 
     vkDestroyDescriptorSetLayout(vulkanContext.device, globalDescriptorLayout, nullptr);
@@ -421,6 +378,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     if (m_vertices.empty()) {
         return;
     }
+
+    createDrawDatas(cmd);
 
     VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(vulkanContext.drawImage.imageView, nullptr);
     VkRenderingAttachmentInfo depthAttachment = VkInit::depthAttachmentInfo(vulkanContext.depthImage.imageView);
@@ -452,14 +411,16 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                     1, &uniformCopy);
 
     DescriptorWriter writer;
-    writer.writeBuffer(0, m_boundedUniformBuffers[currentFrame].buffer, sizeof(GlobalUniformData), 0,
+    writer.writeBuffer(UNIFORM_BINDING, m_boundedUniformBuffers[currentFrame].buffer, sizeof(GlobalUniformData), 0,
                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.writeBuffer(MATERIAL_BINDING, m_boundedMaterialBuffer.buffer, m_boundedMaterialBuffer.info.size, 0,
+                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    writer.writeBuffer(TRANSFORM_BINDING, m_boundedTransformBuffers[currentFrame].buffer,
+                       m_boundedTransformBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
-
-    auto start = std::chrono::system_clock::now();
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
     vkCmdSetViewport(cmd, 0, 1, &viewport);
@@ -473,8 +434,6 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     PushConstantsBindless pcb = {};
     pcb.vertexBuffer = vulkanContext.getBufferAddress(m_boundedVertexBuffer);
-    pcb.transformBuffer = vulkanContext.getBufferAddress(m_boundedTransformBuffer);
-    pcb.materialBuffer = vulkanContext.getBufferAddress(m_boundedMaterialBuffer);
 
     for (const auto &scene: m_scenes) {
         for (const auto &drawData: scene.second.drawDatas) {
@@ -492,11 +451,6 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
             }
         }
     }
-
-    auto end = std::chrono::system_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-    std::cout << "draw time: " << elapsed.count() / 1000.f << std::endl;
 
     vkCmdEndRendering(cmd);
 }
@@ -573,11 +527,93 @@ void Renderer::destroyStaticBuffers() {
     if (m_boundedVertexBuffer.buffer != VK_NULL_HANDLE) {
         vulkanContext.destroyBuffer(m_boundedVertexBuffer);
     }
-    if (m_boundedTransformBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_boundedTransformBuffer);
-    }
     if (m_boundedMaterialBuffer.buffer != VK_NULL_HANDLE) {
         vulkanContext.destroyBuffer(m_boundedMaterialBuffer);
     }
+}
+
+void Renderer::createDrawDatas(VkCommandBuffer cmd) {
+    m_transforms.clear();
+
+    for (auto &scenePair: m_scenes) {
+        auto scene = scenePair.first.get();
+        auto &sceneData = scenePair.second;
+
+        sceneData.drawDatas.clear();
+
+        for (const auto &topLevelNode: scene->topLevelNodes) {
+            std::stack<std::shared_ptr<Node> > nodeStack;
+            nodeStack.push(topLevelNode);
+
+            while (!nodeStack.empty()) {
+                auto currentNode = nodeStack.top();
+                nodeStack.pop();
+
+                if (auto parentNode = currentNode->parent.lock()) {
+                    currentNode->worldTransform = parentNode->worldTransform * currentNode->localTransform;
+                } else {
+                    currentNode->worldTransform = currentNode->localTransform;
+                }
+
+                if (const auto &nodeMesh = currentNode->mesh) {
+                    for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
+                        DrawData drawData = {};
+                        drawData.hasIndices = meshPrimitive.hasIndices;
+                        drawData.indexOffset = meshPrimitive.indexStart + sceneData.indexOffset;
+                        drawData.vertexOffset = meshPrimitive.vertexStart + sceneData.vertexOffset;
+                        drawData.indexCount = meshPrimitive.indexCount;
+                        drawData.vertexCount = meshPrimitive.vertexCount;
+                        if (meshPrimitive.materialOffset == DEFAULT_MATERIAL) {
+                            drawData.materialOffset = 0; // default material at index 0
+                        } else {
+                            drawData.materialOffset = meshPrimitive.materialOffset + sceneData.materialOffset;
+                        }
+                        drawData.transformOffset = m_transforms.size();
+
+                        sceneData.drawDatas.emplace_back(drawData);
+                    }
+                    m_transforms.emplace_back(currentNode->worldTransform);
+                }
+
+                for (const auto &child: currentNode->children) {
+                    nodeStack.push(child);
+                }
+            }
+        }
+    }
+
+    // (re)create buffers if size changes
+    uint32_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
+
+    if (transformBufferSize != m_transformBuffer.info.size) {
+        if (m_transformBuffer.buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_transformBuffer);
+        }
+        m_transformBuffer = vulkanContext.createBuffer(transformBufferSize,
+                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                       VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    }
+
+    if (transformBufferSize != m_boundedTransformBuffers[currentFrame].info.size) {
+        if (m_boundedTransformBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedTransformBuffers[currentFrame]);
+        }
+        m_boundedTransformBuffers[currentFrame] = vulkanContext.createBuffer(transformBufferSize,
+                                                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                             VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    }
+
+    // update buffers
+    memcpy(m_transformBuffer.info.pMappedData, m_transforms.data(), transformBufferSize);
+
+    VkBufferCopy transformCopy = {0};
+    transformCopy.dstOffset = 0;
+    transformCopy.srcOffset = 0;
+    transformCopy.size = transformBufferSize;
+    vkCmdCopyBuffer(cmd, m_transformBuffer.buffer, m_boundedTransformBuffers[currentFrame].buffer,
+                    1, &transformCopy);
 }
 

@@ -12,11 +12,9 @@ struct Stats {
 //todo: separate into ranges
 struct PushConstantsBindless {
     VkDeviceAddress vertexBuffer;
-    VkDeviceAddress transformBuffer;
-    VkDeviceAddress materialBuffer;
     uint32_t transformOffset;
     uint32_t materialOffset;
-    float pad0[3];
+    float pad0;
 };
 
 struct DrawData {
@@ -75,26 +73,28 @@ private:
 
     std::vector<uint32_t> m_indices;
     std::vector<Vertex> m_vertices;
-    std::vector<glm::mat4> m_transforms;
     std::vector<std::shared_ptr<Texture>> m_textures;
     std::vector<Material> m_materials;
 
-    VulkanBuffer m_uniformBuffer;
-
     VulkanBuffer m_boundedVertexBuffer;
     VulkanBuffer m_boundedIndexBuffer;
-    VulkanBuffer m_boundedTransformBuffer;
     VulkanBuffer m_boundedMaterialBuffer;
-    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
+
+    void destroyStaticBuffers();
+    void createStaticBuffers();
 
     GlobalUniformData m_globalUniformData;
+    VulkanBuffer m_uniformBuffer;
+
+    std::vector<glm::mat4> m_transforms;
+    VulkanBuffer m_transformBuffer;
+
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedTransformBuffers;
 
     Timer m_timer;
 
     Stats m_stats;
-
-    void destroyStaticBuffers();
-    void createStaticBuffers();
 
     void setupVulkan();
 
@@ -103,4 +103,6 @@ private:
     void drawGeometry(VkCommandBuffer cmd);
 
     void initDefaultData();
+
+    void createDrawDatas(VkCommandBuffer cmd);
 };

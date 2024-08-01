@@ -1,6 +1,6 @@
 #version 450
 #extension GL_EXT_buffer_reference : require
-#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_nonuniform_qualifier : require
 
 //shader input
 layout (location = 0) in vec3 inColor;
@@ -10,7 +10,7 @@ layout (location = 1) in vec2 inUV;
 layout (location = 0) out vec4 outFragColor;
 
 //texture to access
-layout(set = 0, binding = 1) uniform sampler2D displayTexture[];
+layout(set = 0, binding = 3) uniform sampler2D displayTexture[];
 
 struct Vertex {
     vec3 position;
@@ -32,11 +32,7 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer {
     Vertex vertices[];
 };
 
-layout(buffer_reference, std430) readonly buffer TransformBuffer {
-    mat4 transforms[];
-};
-
-layout(buffer_reference, std430) readonly buffer MaterialBuffer {
+layout(std430, set = 0, binding = 2) readonly buffer MaterialsBuffer {
     Material materials[];
 };
 
@@ -44,15 +40,13 @@ layout(buffer_reference, std430) readonly buffer MaterialBuffer {
 layout(push_constant) uniform constants
 {
     VertexBuffer vertexBuffer;
-    TransformBuffer transformBuffer;
-    MaterialBuffer materialBuffer;
     uint transformOffset;
     uint materialOffset;
-    float pad0[3];
+    float pad0;
 } pc;
 
 void main()
 {
-    Material material = pc.materialBuffer.materials[pc.materialOffset];
+    Material material = materials[pc.materialOffset];
     outFragColor = material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
 }

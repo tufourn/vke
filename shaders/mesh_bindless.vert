@@ -10,6 +10,10 @@ layout(set = 0, binding = 0) uniform GlobalUniform {
     mat4 projView;
 } globalUniform;
 
+layout(std430, set = 0, binding = 1) readonly buffer TransformBuffer {
+    mat4 transforms[];
+};
+
 struct Vertex {
     vec3 position;
     float uv_x;
@@ -17,43 +21,24 @@ struct Vertex {
     float uv_y;
 };
 
-struct Material {
-    vec4 baseColorFactor;
-
-    float metallicFactor;
-    float roughnessFactor;
-    uint baseTextureOffset;
-    float pad0;
-};
-
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
     Vertex vertices[];
-};
-
-layout(buffer_reference, std430) readonly buffer TransformBuffer {
-    mat4 transforms[];
-};
-
-layout(buffer_reference, std430) readonly buffer MaterialBuffer {
-    Material materials[];
 };
 
 //push constants block
 layout(push_constant) uniform constants
 {
     VertexBuffer vertexBuffer;
-    TransformBuffer transformBuffer;
-    MaterialBuffer materialBuffer;
     uint transformOffset;
     uint materialOffset;
-    float pad0[3];
+    float pad0;
 } pc;
 
 void main()
 {
     //load vertex data from device adress
     Vertex v = pc.vertexBuffer.vertices[gl_VertexIndex];
-    mat4 transform = pc.transformBuffer.transforms[pc.transformOffset];
+    mat4 transform = transforms[pc.transformOffset];
 
     //output data
     gl_Position = globalUniform.projView * transform * vec4(v.position, 1.0f);
