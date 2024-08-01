@@ -258,7 +258,8 @@ void Renderer::setupVulkan() {
     descriptorLayoutBuilder.addBinding(MATERIAL_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    std::array<VkDescriptorBindingFlags, 3> flagArray = {
+    std::array<VkDescriptorBindingFlags, 4> flagArray = {
+            0,
             0,
             0,
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
@@ -539,6 +540,8 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
         auto scene = scenePair.first.get();
         auto &sceneData = scenePair.second;
 
+        scene->updateAnimation(m_timer.deltaTime());
+
         sceneData.drawDatas.clear();
 
         for (const auto &topLevelNode: scene->topLevelNodes) {
@@ -550,9 +553,9 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                 nodeStack.pop();
 
                 if (auto parentNode = currentNode->parent.lock()) {
-                    currentNode->worldTransform = parentNode->worldTransform * currentNode->localTransform;
+                    currentNode->worldTransform = parentNode->worldTransform * currentNode->getLocalTransform();
                 } else {
-                    currentNode->worldTransform = currentNode->localTransform;
+                    currentNode->worldTransform = currentNode->getLocalTransform();
                 }
 
                 if (const auto &nodeMesh = currentNode->mesh) {

@@ -38,9 +38,13 @@ public:
     std::vector<uint32_t> indexBuffer;
     std::vector<Vertex> vertexBuffer;
 
+    std::vector<Animation> animations;
+
     void clear();
 
     void load(std::filesystem::path filePath);
+
+    void updateAnimation(float deltaTime);
 
 private:
     void parseImages(const cgltf_data *data);

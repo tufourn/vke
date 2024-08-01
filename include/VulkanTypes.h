@@ -1,10 +1,12 @@
 #pragma once
 
 #define VK_NO_PROTOTYPES
+#define GLM_ENABLE_EXPERIMENTAL
 
 #include <volk.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <string>
 #include <memory>
 
@@ -77,8 +79,18 @@ struct Node {
 
     std::shared_ptr<Mesh> mesh;
 
-    glm::mat4 localTransform = glm::mat4(1.f);
+    glm::vec3 translation;
+    glm::quat rotation;
+    glm::vec3 scale;
+
     glm::mat4 worldTransform = glm::mat4(1.f);
+    glm::mat4 getLocalTransform() {
+        glm::mat4 translationMatrix = glm::translate(glm::mat4(1.f), translation);
+        glm::mat4 rotationMatrix = glm::toMat4(rotation);
+        glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.f), scale);
+
+        return translationMatrix * rotationMatrix * scaleMatrix;
+    };
 };
 
 struct AnimationSampler {
@@ -102,7 +114,7 @@ struct AnimationChannel {
     };
 
     Path path;
-    Node* node;
+    uint32_t nodeIndex;
     uint32_t samplerIndex;
 };
 

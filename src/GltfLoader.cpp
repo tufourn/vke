@@ -37,7 +37,7 @@ void Scene::parseTextures(const cgltf_data *data) {
         }
 
         size_t imageIndex = gltfTexture->image - data->images;
-        if (images[imageIndex].has_value()) {
+        if (!images.empty() && images[imageIndex].has_value()) {
             texture.imageview = images[imageIndex].value().imageView;
         } else {
             // if image can't be loaded, use the error checkerboard texture
@@ -251,6 +251,8 @@ void Scene::parseImages(const cgltf_data *data) {
                     images.emplace_back();
                 }
             }
+        } else {
+            //todo: read image from buffer
         }
     }
 }
@@ -417,24 +419,22 @@ void Scene::parseNodes(const cgltf_data *data) {
             newNode->mesh = meshes[gltfNode.mesh - data->meshes];
         }
 
-        glm::mat4 translation = glm::translate(glm::mat4(1.f), {
+        newNode->translation = {
                 gltfNode.translation[0],
                 gltfNode.translation[1],
                 gltfNode.translation[2]
-        });
+        };
 
-        glm::quat rotation = glm::quat(gltfNode.rotation[3],
-                                       gltfNode.rotation[0],
-                                       gltfNode.rotation[1],
-                                       gltfNode.rotation[2]);
+        newNode->rotation = glm::quat(gltfNode.rotation[3],
+                                      gltfNode.rotation[0],
+                                      gltfNode.rotation[1],
+                                      gltfNode.rotation[2]);
 
-        glm::mat4 scale = glm::scale(glm::mat4(1.f), {
+        newNode->scale = {
                 gltfNode.scale[0],
                 gltfNode.scale[1],
                 gltfNode.scale[2]
-        });
-
-        newNode->localTransform = translation * glm::toMat4(rotation) * scale;
+        };
 
         nodes.emplace_back(newNode);
     }
@@ -456,7 +456,6 @@ void Scene::parseNodes(const cgltf_data *data) {
     }
 }
 
-//todo: wip
 void Scene::parseAnimations(const cgltf_data *data) {
     for (size_t animation_i = 0; animation_i < data->animations_count; animation_i++) {
         const cgltf_animation *gltfAnimation = &data->animations[animation_i];
@@ -521,6 +520,17 @@ void Scene::parseAnimations(const cgltf_data *data) {
                     break;
                 }
             }
+
+            for (const auto &timestamp: sampler.inputs) {
+                if (timestamp < animation.start) {
+                    animation.start = timestamp;
+                }
+                if (timestamp > animation.end) {
+                    animation.end = timestamp;
+                }
+            }
+
+            animation.samplers.emplace_back(sampler);
         }
 
         for (size_t channel_i = 0; channel_i < gltfAnimation->channels_count; channel_i++) {
@@ -544,10 +554,165 @@ void Scene::parseAnimations(const cgltf_data *data) {
                     std::cout << "Invalid animation channel path" << std::endl;
                     break;
             }
+
+            channel.nodeIndex = gltfChannel->target_node - data->nodes;
+            channel.samplerIndex = gltfChannel->sampler - gltfAnimation->samplers;
+
+            animation.channels.emplace_back(channel);
         }
+
+        animations.emplace_back(animation);
     }
 }
 
 Scene::~Scene() {
     clear();
+}
+
+void Scene::updateAnimation(float deltaTime) {
+    for (auto &animation: animations) {
+        for (auto &channel: animation.channels) {
+            const AnimationSampler &sampler = animation.samplers[channel.samplerIndex];
+
+            if (sampler.inputs.size() > sampler.outputs.size()) {
+                std::cout << "Invalid sampler input/output sizes" << std::endl;
+            }
+
+            animation.currentTime += deltaTime;
+            while (animation.currentTime > animation.end) {
+                animation.currentTime -= animation.end;
+            }
+
+            for (size_t timestamp_i = 0; timestamp_i < sampler.inputs.size() - 1; timestamp_i++) {
+                if (animation.currentTime > sampler.inputs[timestamp_i] &&
+                    animation.currentTime < sampler.inputs[timestamp_i + 1]) {
+                    float td = sampler.inputs[timestamp_i + 1] - sampler.inputs[timestamp_i];
+                    float interpolateValue = (animation.currentTime - sampler.inputs[timestamp_i]) / td;
+
+                    switch (sampler.interpolation) {
+                        case AnimationSampler::eLinear: {
+                            if (sampler.inputs.size() != sampler.outputs.size()) {
+                                std::cout << "input/output size must be equal for linear interpolation" << std::endl;
+                            }
+                            switch (channel.path) {
+                                case AnimationChannel::eTranslation: {
+                                    nodes[channel.nodeIndex]->translation = glm::mix(
+                                            sampler.outputs[timestamp_i], sampler.outputs[timestamp_i + 1],
+                                            interpolateValue
+                                    );
+                                    break;
+                                }
+                                case AnimationChannel::eRotation: {
+                                    glm::quat q1;
+                                    q1.x = sampler.outputs[timestamp_i].x;
+                                    q1.y = sampler.outputs[timestamp_i].y;
+                                    q1.z = sampler.outputs[timestamp_i].z;
+                                    q1.w = sampler.outputs[timestamp_i].w;
+
+                                    glm::quat q2;
+                                    q2.x = sampler.outputs[timestamp_i + 1].x;
+                                    q2.y = sampler.outputs[timestamp_i + 1].y;
+                                    q2.z = sampler.outputs[timestamp_i + 1].z;
+                                    q2.w = sampler.outputs[timestamp_i + 1].w;
+
+                                    nodes[channel.nodeIndex]->rotation = glm::normalize(
+                                            glm::slerp(q1, q2, interpolateValue));
+                                    break;
+                                }
+                                case AnimationChannel::eScale: {
+                                    nodes[channel.nodeIndex]->scale = glm::mix(
+                                            sampler.outputs[timestamp_i], sampler.outputs[timestamp_i + 1],
+                                            interpolateValue
+                                    );
+                                    break;
+                                }
+                                case AnimationChannel::eWeights: {
+                                    std::cout << "weights animation channel not yet supported" << std::endl;
+                                }
+                            }
+                            break;
+                        }
+                        case AnimationSampler::eCubicSpline: {
+                            if (sampler.inputs.size() * 3 != sampler.outputs.size()) {
+                                std::cout << "output size must be 3x input for cubic spline interpolation" << std::endl;
+                            }
+
+                            float t = interpolateValue;
+                            float t2 = t * t;
+                            float t3 = t2 * t;
+
+                            glm::vec4 ak = sampler.outputs[timestamp_i * 3];
+                            glm::vec4 vk = sampler.outputs[timestamp_i * 3 + 1];
+                            glm::vec4 bk = sampler.outputs[timestamp_i * 3 + 2];
+
+                            glm::vec4 ak_p1 = sampler.outputs[(timestamp_i + 1) * 3];
+                            glm::vec4 vk_p1 = sampler.outputs[(timestamp_i + 1) * 3 + 1];
+
+                            // calculation per gltf spec
+                            glm::vec4 result = (2 * t3 - 3 * t2 + 1) * vk +
+                                               td * (t3 - 2 * t2 + t) * bk +
+                                               (-2 * t3 + 3 * t2) * vk_p1 +
+                                               td * (t3 - t2) * ak_p1;
+
+                            switch (channel.path) {
+                                case AnimationChannel::eTranslation: {
+                                    nodes[channel.nodeIndex]->translation = result;
+                                    break;
+                                }
+                                case AnimationChannel::eRotation: {
+                                    result = normalize(result);
+                                    glm::quat quat;
+                                    quat.x = result.x;
+                                    quat.y = result.y;
+                                    quat.z = result.z;
+                                    quat.w = result.w;
+                                    nodes[channel.nodeIndex]->rotation = quat;
+                                    break;
+                                }
+                                case AnimationChannel::eScale: {
+                                    nodes[channel.nodeIndex]->scale = result;
+                                    break;
+                                }
+                                case AnimationChannel::eWeights: {
+                                    std::cout << "weights animation channel not yet supported" << std::endl;
+                                }
+                            }
+                            break;
+                        }
+                        case AnimationSampler::eStep: {
+                            if (sampler.inputs.size() != sampler.outputs.size()) {
+                                std::cout << "input/output size must be equal for step interpolation" << std::endl;
+                            }
+
+                            switch (channel.path) {
+                                case AnimationChannel::eTranslation: {
+                                    nodes[channel.nodeIndex]->translation = sampler.outputs[timestamp_i];
+                                    break;
+                                }
+                                case AnimationChannel::eRotation: {
+                                    glm::quat quat;
+                                    quat.x = sampler.outputs[timestamp_i].x;
+                                    quat.y = sampler.outputs[timestamp_i].y;
+                                    quat.z = sampler.outputs[timestamp_i].z;
+                                    quat.w = sampler.outputs[timestamp_i].w;
+                                    nodes[channel.nodeIndex]->rotation = quat;
+                                    break;
+                                }
+                                case AnimationChannel::eScale: {
+                                    nodes[channel.nodeIndex]->scale = sampler.outputs[timestamp_i];
+                                    break;
+                                }
+                                case AnimationChannel::eWeights: {
+                                    std::cout << "weights animation channel not yet supported" << std::endl;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }

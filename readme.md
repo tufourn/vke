@@ -6,3 +6,4 @@ A Vulkan renderer. It's primarily a playground for me to learn and try to implem
 ## Features
 - Bindless resources
 - glTF scene loading
+- Animations
