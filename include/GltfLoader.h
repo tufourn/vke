@@ -11,13 +11,16 @@
 
 constexpr uint32_t DEFAULT_MATERIAL = UINT32_MAX;
 constexpr uint32_t OPAQUE_WHITE_TEXTURE = UINT32_MAX;
+constexpr uint32_t JOINT_IDENTITY_MATRIX = UINT32_MAX;
 
 class Renderer;
 
 struct Scene {
 public:
     MOVABLE_ONLY(Scene);
+
     Scene(Renderer *renderer);
+
     ~Scene();
 
     std::filesystem::path path;
@@ -39,6 +42,10 @@ public:
     std::vector<Vertex> vertexBuffer;
 
     std::vector<Animation> animations;
+    std::vector<std::unique_ptr<Skin>> skins;
+
+    std::vector<uint32_t> skinJointCounts;
+    std::vector<uint32_t> jointOffsets;
 
     void clear();
 
@@ -58,6 +65,8 @@ private:
     void parseMaterials(const cgltf_data *data);
 
     void parseAnimations(const cgltf_data *data);
+
+    void parseSkins(const cgltf_data *data);
 };
 
 static VkFilter extractGltfMagFilter(int gltfMagFilter);

@@ -7,3 +7,4 @@ A Vulkan renderer. It's primarily a playground for me to learn and try to implem
 - Bindless resources
 - glTF scene loading
 - Animations
+- Vertex skinning

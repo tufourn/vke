@@ -42,6 +42,8 @@ struct Vertex {
     float uv_x;
     glm::vec3 normal;
     float uv_y;
+    glm::vec4 jointIndices; // max 4 joints
+    glm::vec4 jointWeights;
 };
 
 struct Texture {
@@ -65,6 +67,7 @@ struct MeshPrimitive {
     uint32_t vertexCount;
     uint32_t materialOffset;
     bool hasIndices;
+    bool hasSkin;
 };
 
 struct Mesh {
@@ -83,6 +86,9 @@ struct Node {
     glm::vec3 translation;
     glm::quat rotation;
     glm::vec3 scale;
+
+    uint32_t skin;
+    bool hasSkin;
 
     glm::mat4 worldTransform = glm::mat4(1.f);
     glm::mat4 getLocalTransform() {
@@ -126,4 +132,11 @@ struct Animation {
     float start = std::numeric_limits<float>::max();
     float end = std::numeric_limits<float>::min();
     float currentTime = 0.f;
+};
+
+struct Skin {
+    std::string name;
+    std::vector<glm::mat4> inverseBindMatrices;
+    uint32_t skeletonNodeIndex;
+    std::vector<uint32_t> jointNodeIndices;
 };

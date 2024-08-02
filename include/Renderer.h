@@ -14,17 +14,18 @@ struct PushConstantsBindless {
     VkDeviceAddress vertexBuffer;
     uint32_t transformOffset;
     uint32_t materialOffset;
-    float pad0;
+    uint32_t jointOffset;
 };
 
 struct DrawData {
-    bool hasIndices;
     uint32_t indexOffset;
     uint32_t vertexOffset;
     uint32_t transformOffset;
     uint32_t indexCount;
     uint32_t vertexCount;
     uint32_t materialOffset;
+    uint32_t jointOffset;
+    bool hasIndices;
 };
 
 struct SceneData {
@@ -33,6 +34,7 @@ struct SceneData {
     uint32_t textureOffset;
     uint32_t materialOffset;
     std::vector<DrawData> drawDatas;
+    uint32_t jointOffset;
 };
 
 struct GlobalUniformData {
@@ -89,8 +91,12 @@ private:
     std::vector<glm::mat4> m_transforms;
     VulkanBuffer m_transformBuffer;
 
+    std::vector<glm::mat4> m_joints;
+    VulkanBuffer m_jointBuffer;
+
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedTransformBuffers;
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedJointBuffers;
 
     Timer m_timer;
 

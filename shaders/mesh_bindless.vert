@@ -14,11 +14,17 @@ layout(std430, set = 0, binding = 1) readonly buffer TransformBuffer {
     mat4 transforms[];
 };
 
+layout(std430, set = 0, binding = 3) readonly buffer JointBuffer {
+    mat4 joints[];
+};
+
 struct Vertex {
     vec3 position;
     float uv_x;
     vec3 normal;
     float uv_y;
+    vec4 jointIndices;
+    vec4 jointWeights;
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
@@ -31,7 +37,7 @@ layout(push_constant) uniform constants
     VertexBuffer vertexBuffer;
     uint transformOffset;
     uint materialOffset;
-    float pad0;
+    uint jointOffset;
 } pc;
 
 void main()
@@ -40,8 +46,14 @@ void main()
     Vertex v = pc.vertexBuffer.vertices[gl_VertexIndex];
     mat4 transform = transforms[pc.transformOffset];
 
+    mat4 skinMatrix =
+        v.jointWeights.x * joints[pc.jointOffset + int(v.jointIndices.x)] +
+        v.jointWeights.y * joints[pc.jointOffset + int(v.jointIndices.y)] +
+        v.jointWeights.z * joints[pc.jointOffset + int(v.jointIndices.z)] +
+        v.jointWeights.w * joints[pc.jointOffset + int(v.jointIndices.w)];
+
     //output data
-    gl_Position = globalUniform.projView * transform * vec4(v.position, 1.0f);
+    gl_Position = globalUniform.projView * transform * skinMatrix * vec4(v.position, 1.0f);
 
     outUV.x = v.uv_x;
     outUV.y = v.uv_y;

@@ -13,7 +13,8 @@ static constexpr uint32_t MAX_TEXTURES = 1024;
 static constexpr uint32_t UNIFORM_BINDING = 0;
 static constexpr uint32_t TRANSFORM_BINDING = 1;
 static constexpr uint32_t MATERIAL_BINDING = 2;
-static constexpr uint32_t TEXTURE_BINDING = 3;
+static constexpr uint32_t JOINT_BINDING = 3;
+static constexpr uint32_t TEXTURE_BINDING = 4;
 
 Renderer::Renderer() {
     setupVulkan();
@@ -256,9 +257,11 @@ void Renderer::setupVulkan() {
     descriptorLayoutBuilder.addBinding(UNIFORM_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     descriptorLayoutBuilder.addBinding(TRANSFORM_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(MATERIAL_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    descriptorLayoutBuilder.addBinding(JOINT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    std::array<VkDescriptorBindingFlags, 4> flagArray = {
+    std::array<VkDescriptorBindingFlags, 5> flagArray = {
+            0,
             0,
             0,
             0,
@@ -280,7 +283,7 @@ void Renderer::setupVulkan() {
 
     std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
             {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         1},
     };
 
@@ -357,6 +360,7 @@ void Renderer::terminateVulkan() {
 
     vulkanContext.destroyBuffer(m_uniformBuffer);
     vulkanContext.destroyBuffer(m_transformBuffer);
+    vulkanContext.destroyBuffer(m_jointBuffer);
 
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
         if (m_boundedUniformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
@@ -364,6 +368,9 @@ void Renderer::terminateVulkan() {
         }
         if (m_boundedTransformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_boundedTransformBuffers[frame_i]);
+        }
+        if (m_boundedJointBuffers[frame_i].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedJointBuffers[frame_i]);
         }
     }
 
@@ -418,6 +425,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.writeBuffer(TRANSFORM_BINDING, m_boundedTransformBuffers[currentFrame].buffer,
                        m_boundedTransformBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    writer.writeBuffer(JOINT_BINDING, m_boundedJointBuffers[currentFrame].buffer,
+                       m_boundedJointBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
@@ -440,6 +449,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
         for (const auto &drawData: scene.second.drawDatas) {
             pcb.transformOffset = drawData.transformOffset;
             pcb.materialOffset = drawData.materialOffset;
+            pcb.jointOffset = drawData.jointOffset;
 
             vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                0,
@@ -459,6 +469,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 void Renderer::initDefaultData() {
     m_textures.clear();
     m_materials.clear();
+    m_joints = {glm::mat4(1.f)};
 
     uint32_t opaqueWhite = glm::packUnorm4x8(glm::vec4(1.f, 1.f, 1.f, 1.f));
     uint32_t black = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
@@ -535,6 +546,7 @@ void Renderer::destroyStaticBuffers() {
 
 void Renderer::createDrawDatas(VkCommandBuffer cmd) {
     m_transforms.clear();
+    m_joints = {glm::mat4(1.f)}; // joint index zero is identity matrix
 
     for (auto &scenePair: m_scenes) {
         auto scene = scenePair.first.get();
@@ -542,10 +554,18 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
 
         scene->updateAnimation(m_timer.deltaTime());
 
+        sceneData.jointOffset = m_joints.size();
+        size_t numSceneJoints = 0;
+        for (const auto &num: scene->skinJointCounts) {
+            numSceneJoints += num;
+        }
+        m_joints.resize(m_joints.size() + numSceneJoints);
+
         sceneData.drawDatas.clear();
 
+        // update world transform of nodes
         for (const auto &topLevelNode: scene->topLevelNodes) {
-            std::stack<std::shared_ptr<Node> > nodeStack;
+            std::stack<std::shared_ptr<Node>> nodeStack;
             nodeStack.push(topLevelNode);
 
             while (!nodeStack.empty()) {
@@ -556,6 +576,30 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                     currentNode->worldTransform = parentNode->worldTransform * currentNode->getLocalTransform();
                 } else {
                     currentNode->worldTransform = currentNode->getLocalTransform();
+                }
+                for (const auto &child: currentNode->children) {
+                    nodeStack.push(child);
+                }
+            }
+        }
+
+        // generate draw datas
+        for (const auto &topLevelNode: scene->topLevelNodes) {
+            std::stack<std::shared_ptr<Node> > nodeStack;
+            nodeStack.push(topLevelNode);
+
+            while (!nodeStack.empty()) {
+                auto currentNode = nodeStack.top();
+                nodeStack.pop();
+
+                if (currentNode->hasSkin) {
+                    glm::mat4 inverseWorldTransform = glm::inverse(currentNode->worldTransform);
+                    const Skin *skin = scene->skins[currentNode->skin].get();
+                    for (size_t joint_i = 0; joint_i < skin->jointNodeIndices.size(); joint_i++) {
+                        m_joints[sceneData.jointOffset + scene->jointOffsets[currentNode->skin] + joint_i] =
+                                inverseWorldTransform * scene->nodes[skin->jointNodeIndices[joint_i]]->worldTransform *
+                                skin->inverseBindMatrices[joint_i];
+                    }
                 }
 
                 if (const auto &nodeMesh = currentNode->mesh) {
@@ -572,7 +616,11 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                             drawData.materialOffset = meshPrimitive.materialOffset + sceneData.materialOffset;
                         }
                         drawData.transformOffset = m_transforms.size();
-
+                        if (currentNode->hasSkin) {
+                            drawData.jointOffset = scene->jointOffsets[currentNode->skin] + sceneData.jointOffset;
+                        } else {
+                            drawData.jointOffset = 0;
+                        }
                         sceneData.drawDatas.emplace_back(drawData);
                     }
                     m_transforms.emplace_back(currentNode->worldTransform);
@@ -587,6 +635,7 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
 
     // (re)create buffers if size changes
     uint32_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
+    uint32_t jointBufferSize = m_joints.size() * sizeof(glm::mat4);
 
     if (transformBufferSize != m_transformBuffer.info.size) {
         if (m_transformBuffer.buffer != VK_NULL_HANDLE) {
@@ -609,8 +658,30 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                                                                              VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
+    if (jointBufferSize != m_jointBuffer.info.size) {
+        if (m_jointBuffer.buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_jointBuffer);
+        }
+        m_jointBuffer = vulkanContext.createBuffer(jointBufferSize,
+                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                   VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                   VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    }
+
+    if (jointBufferSize != m_boundedJointBuffers[currentFrame].info.size) {
+        if (m_boundedJointBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedJointBuffers[currentFrame]);
+        }
+        m_boundedJointBuffers[currentFrame] = vulkanContext.createBuffer(jointBufferSize,
+                                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                         VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    }
+
     // update buffers
     memcpy(m_transformBuffer.info.pMappedData, m_transforms.data(), transformBufferSize);
+    memcpy(m_jointBuffer.info.pMappedData, m_joints.data(), jointBufferSize);
 
     VkBufferCopy transformCopy = {0};
     transformCopy.dstOffset = 0;
@@ -618,5 +689,12 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
     transformCopy.size = transformBufferSize;
     vkCmdCopyBuffer(cmd, m_transformBuffer.buffer, m_boundedTransformBuffers[currentFrame].buffer,
                     1, &transformCopy);
+
+    VkBufferCopy jointCopy = {0};
+    jointCopy.dstOffset = 0;
+    jointCopy.srcOffset = 0;
+    jointCopy.size = jointBufferSize;
+    vkCmdCopyBuffer(cmd, m_jointBuffer.buffer, m_boundedJointBuffers[currentFrame].buffer,
+                    1, &jointCopy);
 }
 

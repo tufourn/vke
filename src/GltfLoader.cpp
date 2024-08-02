@@ -12,6 +12,7 @@
 #include <stb_image.h>
 #include <iostream>
 #include <Utils.h>
+#include <numeric>
 
 void Scene::parseTextures(const cgltf_data *data) {
     for (auto sampler_i = 0; sampler_i < data->samplers_count; sampler_i++) {
@@ -169,6 +170,7 @@ void Scene::load(std::filesystem::path filePath) {
     parseMesh(data);
     parseNodes(data);
     parseAnimations(data);
+    parseSkins(data);
 
     cgltf_free(data);
     loaded = true;
@@ -292,6 +294,14 @@ void Scene::parseMesh(const cgltf_data *data) {
             const cgltf_buffer_view *uvBufferView = nullptr;
             const std::byte *uvBuffer = nullptr;
 
+            const cgltf_accessor *jointAccessor = nullptr;
+            const cgltf_buffer_view *jointBufferView = nullptr;
+            const std::byte *jointBuffer = nullptr;
+
+            const cgltf_accessor *weightAccessor = nullptr;
+            const cgltf_buffer_view *weightBufferView = nullptr;
+            const std::byte *weightBuffer = nullptr;
+
             for (size_t attr_i = 0; attr_i < gltfPrimitive->attributes_count; attr_i++) {
                 const cgltf_attribute *gltfAttribute = &gltfPrimitive->attributes[attr_i];
                 switch (gltfAttribute->type) {
@@ -314,6 +324,18 @@ void Scene::parseMesh(const cgltf_data *data) {
                         uvBuffer = static_cast<const std::byte *>(uvBufferView->buffer->data);
                         break;
                     }
+                    case cgltf_attribute_type_joints: {
+                        jointAccessor = gltfAttribute->data;
+                        jointBufferView = jointAccessor->buffer_view;
+                        jointBuffer = static_cast<const std::byte *>(jointBufferView->buffer->data);
+                        break;
+                    }
+                    case cgltf_attribute_type_weights: {
+                        weightAccessor = gltfAttribute->data;
+                        weightBufferView = weightAccessor->buffer_view;
+                        weightBuffer = static_cast<const std::byte *>(weightBufferView->buffer->data);
+                        break;
+                    }
                     default:
                         break;
                 }
@@ -323,6 +345,8 @@ void Scene::parseMesh(const cgltf_data *data) {
                            (!normalBuffer || normalAccessor->count == positionAccessor->count) &&
                            (!uvBuffer || uvAccessor->count == positionAccessor->count)
             );
+
+            newPrimitive.hasSkin = jointBuffer && weightBuffer;
 
             for (size_t vertex_i = 0; vertex_i < vertexCount; vertex_i++) {
                 Vertex vertex = {};
@@ -348,6 +372,58 @@ void Scene::parseMesh(const cgltf_data *data) {
                     glm::vec2 uv = glm::make_vec2(reinterpret_cast<const float *>(&uvBuffer[uvOffset]));
                     vertex.uv_x = uv.x;
                     vertex.uv_y = uv.y;
+                }
+
+                //todo joints and weights
+                if (newPrimitive.hasSkin) {
+                    size_t jointOffset =
+                            jointAccessor->offset + jointBufferView->offset + vertex_i * jointAccessor->stride;
+                    switch (cgltf_component_size(jointAccessor->component_type)) {
+                        case 2: {
+                            const uint16_t *joints = reinterpret_cast<const uint16_t *>(&jointBuffer[jointOffset]);
+                            vertex.jointIndices = glm::make_vec4(joints);
+                            break;
+                        }
+                        case 1: {
+                            const uint8_t *joints = reinterpret_cast<const uint8_t *>(&jointBuffer[jointOffset]);
+                            vertex.jointIndices = glm::make_vec4(joints);
+                            break;
+                        }
+                        default: {
+                            std::cout << "unsupported joint index type" << std::endl;
+                            break;
+                        }
+                    }
+
+                    size_t weightOffset =
+                            weightAccessor->offset + weightBufferView->offset + vertex_i * weightAccessor->stride;
+                    switch (cgltf_component_size(weightAccessor->component_type)) {
+                        case 4: {
+                            const float *weights = reinterpret_cast<const float *>(&weightBuffer[weightOffset]);
+                            vertex.jointWeights = glm::make_vec4(weights);
+                            break;
+                        }
+                        case 2: {
+                            const uint16_t *weights = reinterpret_cast<const uint16_t *>(&weightBuffer[weightOffset]);
+                            vertex.jointWeights = glm::make_vec4(weights);
+                            vertex.jointWeights /= UINT16_MAX;
+                            break;
+                        }
+                        case 1: {
+                            const uint8_t *weights = reinterpret_cast<const uint8_t *>(&weightBuffer[weightOffset]);
+                            vertex.jointWeights = glm::make_vec4(weights);
+                            vertex.jointWeights /= UINT8_MAX;
+                            break;
+                        }
+                        default: {
+                            std::cout << "unsupported weight type" << std::endl;
+                            break;
+                        }
+                    }
+
+                } else {
+                    vertex.jointIndices = glm::vec4(0); // use identity matrix joint
+                    vertex.jointWeights = glm::vec4(1.f, 0.f, 0.f, 0.f); // weight 1.f identity matrix
                 }
 
                 vertexBuffer.push_back(vertex);
@@ -437,6 +513,12 @@ void Scene::parseNodes(const cgltf_data *data) {
         };
 
         newNode->matrix = glm::make_mat4(gltfNode.matrix);
+
+        newNode->hasSkin = false;
+        if (gltfNode.skin != nullptr) {
+            newNode->skin = gltfNode.skin - data->skins;
+            newNode->hasSkin = true;
+        }
 
         nodes.emplace_back(newNode);
     }
@@ -573,16 +655,16 @@ Scene::~Scene() {
 
 void Scene::updateAnimation(float deltaTime) {
     for (auto &animation: animations) {
+        animation.currentTime += deltaTime;
+        while (animation.currentTime > animation.end) {
+            animation.currentTime -= animation.end;
+        }
+
         for (auto &channel: animation.channels) {
             const AnimationSampler &sampler = animation.samplers[channel.samplerIndex];
 
             if (sampler.inputs.size() > sampler.outputs.size()) {
                 std::cout << "Invalid sampler input/output sizes" << std::endl;
-            }
-
-            animation.currentTime += deltaTime;
-            while (animation.currentTime > animation.end) {
-                animation.currentTime -= animation.end;
             }
 
             for (size_t timestamp_i = 0; timestamp_i < sampler.inputs.size() - 1; timestamp_i++) {
@@ -716,5 +798,37 @@ void Scene::updateAnimation(float deltaTime) {
                 }
             }
         }
+    }
+}
+
+void Scene::parseSkins(const cgltf_data *data) {
+    for (size_t skin_i = 0; skin_i < data->skins_count; skin_i++) {
+        const cgltf_skin *gltfSkin = &data->skins[skin_i];
+        auto skin = std::make_unique<Skin>();
+
+        if (gltfSkin->name) {
+            skin->name = gltfSkin->name;
+        }
+
+        if (gltfSkin->skeleton) {
+            skin->skeletonNodeIndex = gltfSkin->skeleton - data->nodes;
+        }
+
+        for (size_t joint_i = 0; joint_i < gltfSkin->joints_count; joint_i++) {
+            skin->jointNodeIndices.emplace_back(static_cast<uint32_t>(gltfSkin->joints[joint_i] - data->nodes));
+        }
+
+        const cgltf_accessor *inverseBindMatrixAccessor = gltfSkin->inverse_bind_matrices;
+        const cgltf_buffer_view *inverseBindMatrixBufferView = inverseBindMatrixAccessor->buffer_view;
+        const auto *inverseBindMatrixBuffer = static_cast<const std::byte *>(inverseBindMatrixBufferView->buffer->data);
+        skin->inverseBindMatrices.resize(inverseBindMatrixAccessor->count);
+        memcpy(skin->inverseBindMatrices.data(),
+               &inverseBindMatrixBuffer[inverseBindMatrixAccessor->offset + inverseBindMatrixBufferView->offset],
+               inverseBindMatrixAccessor->count * sizeof(glm::mat4));
+
+        jointOffsets.emplace_back(std::accumulate(skinJointCounts.begin(), skinJointCounts.end(), 0));
+        skinJointCounts.emplace_back(static_cast<uint32_t>(gltfSkin->joints_count));
+
+        skins.emplace_back(std::move(skin));
     }
 }

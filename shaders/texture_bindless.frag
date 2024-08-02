@@ -10,13 +10,15 @@ layout (location = 1) in vec2 inUV;
 layout (location = 0) out vec4 outFragColor;
 
 //texture to access
-layout(set = 0, binding = 3) uniform sampler2D displayTexture[];
+layout(set = 0, binding = 4) uniform sampler2D displayTexture[];
 
 struct Vertex {
     vec3 position;
     float uv_x;
     vec3 normal;
     float uv_y;
+    vec4 jointIndices;
+    vec4 jointWeights;
 };
 
 struct Material {
@@ -42,7 +44,7 @@ layout(push_constant) uniform constants
     VertexBuffer vertexBuffer;
     uint transformOffset;
     uint materialOffset;
-    float pad0;
+    uint jointOffset;
 } pc;
 
 void main()
