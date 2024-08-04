@@ -1,13 +1,18 @@
 #version 450
 #extension GL_EXT_buffer_reference : require
 
-layout (location = 0) out vec3 outColor;
-layout (location = 1) out vec2 outUV;
+layout (location = 0) out vec3 outFragPos;
+layout (location = 1) out vec3 outNormal;
+layout (location = 2) out vec2 outUV;
+
 
 layout(set = 0, binding = 0) uniform GlobalUniform {
     mat4 view;
     mat4 proj;
     mat4 projView;
+    vec3 cameraPos;
+    uint numLights;
+    float pad[12];
 } globalUniform;
 
 layout(std430, set = 0, binding = 1) readonly buffer TransformBuffer {
@@ -47,13 +52,18 @@ void main()
     mat4 transform = transforms[pc.transformOffset];
 
     mat4 skinMatrix =
-        v.jointWeights.x * joints[pc.jointOffset + int(v.jointIndices.x)] +
-        v.jointWeights.y * joints[pc.jointOffset + int(v.jointIndices.y)] +
-        v.jointWeights.z * joints[pc.jointOffset + int(v.jointIndices.z)] +
-        v.jointWeights.w * joints[pc.jointOffset + int(v.jointIndices.w)];
+    v.jointWeights.x * joints[pc.jointOffset + int(v.jointIndices.x)] +
+    v.jointWeights.y * joints[pc.jointOffset + int(v.jointIndices.y)] +
+    v.jointWeights.z * joints[pc.jointOffset + int(v.jointIndices.z)] +
+    v.jointWeights.w * joints[pc.jointOffset + int(v.jointIndices.w)];
+
+    mat4 model = transform * skinMatrix;
+
+    outFragPos = vec3(model * vec4(v.position, 1.0));
+    outNormal = mat3(transpose(inverse(model))) * v.normal;
 
     //output data
-    gl_Position = globalUniform.projView * transform * skinMatrix * vec4(v.position, 1.0f);
+    gl_Position = globalUniform.projView * vec4(outFragPos, 1.0);
 
     outUV.x = v.uv_x;
     outUV.y = v.uv_y;

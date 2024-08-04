@@ -41,6 +41,9 @@ struct GlobalUniformData {
     glm::mat4 view;
     glm::mat4 proj;
     glm::mat4 projView;
+    glm::vec3 cameraPos;
+    uint32_t numLights;
+    float pad[12];
 };
 
 class Renderer {
@@ -53,6 +56,8 @@ public:
 
     void loadGltf(std::filesystem::path filePath);
 
+    void addLight(Light light);
+
     VulkanContext vulkanContext;
 
     VulkanImage errorTextureImage = {};
@@ -63,6 +68,8 @@ private:
     uint32_t currentFrame = 0;
 
     std::vector<std::pair<std::unique_ptr<Scene>, SceneData>> m_scenes;
+    std::vector<Light> m_lights;
+    VulkanBuffer m_boundedLightBuffer;
 
     VkPipeline trianglePipeline;
     VkPipelineLayout trianglePipelineLayout;

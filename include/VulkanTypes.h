@@ -140,3 +140,8 @@ struct Skin {
     uint32_t skeletonNodeIndex;
     std::vector<uint32_t> jointNodeIndices;
 };
+
+struct Light {
+    glm::vec3 direction;
+    float pad;
+};

@@ -14,7 +14,8 @@ static constexpr uint32_t UNIFORM_BINDING = 0;
 static constexpr uint32_t TRANSFORM_BINDING = 1;
 static constexpr uint32_t MATERIAL_BINDING = 2;
 static constexpr uint32_t JOINT_BINDING = 3;
-static constexpr uint32_t TEXTURE_BINDING = 4;
+static constexpr uint32_t LIGHT_BINDING = 4;
+static constexpr uint32_t TEXTURE_BINDING = 5;
 
 Renderer::Renderer() {
     setupVulkan();
@@ -258,9 +259,11 @@ void Renderer::setupVulkan() {
     descriptorLayoutBuilder.addBinding(TRANSFORM_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(MATERIAL_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(JOINT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    descriptorLayoutBuilder.addBinding(LIGHT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    std::array<VkDescriptorBindingFlags, 5> flagArray = {
+    std::array<VkDescriptorBindingFlags, 6> flagArray = {
+            0,
             0,
             0,
             0,
@@ -283,8 +286,8 @@ void Renderer::setupVulkan() {
 
     std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         1},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         4},
     };
 
     globalDescriptors = DescriptorAllocator();
@@ -357,6 +360,9 @@ void Renderer::terminateVulkan() {
     globalDescriptors.destroyPools(vulkanContext.device);
 
     destroyStaticBuffers();
+    if (m_boundedLightBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_boundedLightBuffer);
+    }
 
     vulkanContext.destroyBuffer(m_uniformBuffer);
     vulkanContext.destroyBuffer(m_transformBuffer);
@@ -407,6 +413,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     m_globalUniformData.view = view;
     m_globalUniformData.proj = projection;
     m_globalUniformData.projView = projection * view;
+    m_globalUniformData.cameraPos = m_camera.position;
+    m_globalUniformData.numLights = m_lights.size();
 
     GlobalUniformData *globalUniformData = static_cast<GlobalUniformData *>(m_uniformBuffer.info.pMappedData);
     *globalUniformData = m_globalUniformData;
@@ -427,6 +435,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                        m_boundedTransformBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.writeBuffer(JOINT_BINDING, m_boundedJointBuffers[currentFrame].buffer,
                        m_boundedJointBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffer.buffer,
+                       m_boundedLightBuffer.info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
@@ -696,5 +706,38 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
     jointCopy.size = jointBufferSize;
     vkCmdCopyBuffer(cmd, m_jointBuffer.buffer, m_boundedJointBuffers[currentFrame].buffer,
                     1, &jointCopy);
+}
+
+void Renderer::addLight(Light light) {
+    m_lights.emplace_back(light);
+    size_t lightBufferSize = m_lights.size() * sizeof(Light);
+
+    VulkanBuffer stagingBuffer = vulkanContext.createBuffer(lightBufferSize,
+                                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                            VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    void *data = stagingBuffer.info.pMappedData;
+    memcpy(data, m_lights.data(), lightBufferSize);
+
+    if (m_boundedLightBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_boundedLightBuffer);
+    }
+
+    m_boundedLightBuffer = vulkanContext.createBuffer(lightBufferSize,
+                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                       VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+
+    vulkanContext.immediateSubmit([&](VkCommandBuffer cmd) {
+        VkBufferCopy lightCopy = {0};
+        lightCopy.dstOffset = 0;
+        lightCopy.srcOffset = 0;
+        lightCopy.size = lightBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_boundedLightBuffer.buffer,
+                        1, &lightCopy);
+    });
+
+    vulkanContext.destroyBuffer(stagingBuffer);
 }
 
