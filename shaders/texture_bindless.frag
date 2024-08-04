@@ -5,6 +5,8 @@
 layout (location = 0) in vec3 inFragPos;
 layout (location = 1) in vec3 inNormal;
 layout (location = 2) in vec2 inUV;
+layout (location = 3) in vec3 inTangent;
+layout (location = 4) in vec3 inBiTangent;
 
 layout (location = 0) out vec4 outFragColor;
 
@@ -33,6 +35,8 @@ struct Vertex {
     float uv_x;
     vec3 normal;
     float uv_y;
+    vec4 tangent;
+    vec4 bitangent;
     vec4 jointIndices;
     vec4 jointWeights;
 };
@@ -43,7 +47,7 @@ struct Material {
     float metallicFactor;
     float roughnessFactor;
     uint baseTextureOffset;
-    float pad0;
+    uint normalTextureOffset;
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
@@ -66,17 +70,41 @@ layout(push_constant) uniform constants
 void main()
 {
     Material material = materials[pc.materialOffset];
+    outFragColor = vec4(0.0);
 
     vec4 baseColor = material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
-    outFragColor = vec4(0.0);
+
+    vec3 norm = texture(displayTexture[nonuniformEXT(material.normalTextureOffset)], inUV).rgb;
+    norm = normalize(norm * 2.0 - 1.0);
+
+    vec3 T = normalize(inTangent);
+    vec3 B = normalize(inBiTangent);
+    vec3 N = normalize(inNormal);
+
+    mat3 TBN = mat3(T, B, N);
+    norm = normalize(TBN * norm);
+
+    vec3 viewDir = normalize(globalUniform.cameraPos - inFragPos);
 
     for (uint i = 0; i < globalUniform.numLights; i++) {
         Light light = lights[i];
 
-        vec3 norm = normalize(inNormal);
+        outFragColor += baseColor * 0.2; // ambient
+
         vec3 lightDir = normalize(light.direction);
+        vec3 halfwayDir = normalize(lightDir + viewDir);
+
         float diff = max(dot(norm, lightDir), 0.0);
 
-        outFragColor += baseColor * diff;
+        float shininess = 32;
+        float spec = 0.0;
+
+        if (diff > 0.0) {
+            spec = pow(max(dot(norm, halfwayDir), 0.0), shininess);
+        }
+
+        vec4 specular = vec4(vec3(spec), 1.0);
+
+        outFragColor += baseColor * diff + specular;
     }
 }

@@ -42,6 +42,8 @@ struct Vertex {
     float uv_x;
     glm::vec3 normal;
     float uv_y;
+    glm::vec4 tangent;
+    glm::vec4 bitangent;
     glm::vec4 jointIndices; // max 4 joints
     glm::vec4 jointWeights;
 };
@@ -57,7 +59,7 @@ struct Material {
     float metallicFactor = 1.f;
     float roughnessFactor = 1.f;
     uint32_t baseTextureOffset = 0;
-    float pad0;
+    uint32_t normalTextureOffset = 0;
 };
 
 struct MeshPrimitive {

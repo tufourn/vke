@@ -4,6 +4,9 @@
 layout (location = 0) out vec3 outFragPos;
 layout (location = 1) out vec3 outNormal;
 layout (location = 2) out vec2 outUV;
+layout (location = 3) out vec3 outTangent;
+layout (location = 4) out vec3 outBitangent;
+
 
 
 layout(set = 0, binding = 0) uniform GlobalUniform {
@@ -28,6 +31,8 @@ struct Vertex {
     float uv_x;
     vec3 normal;
     float uv_y;
+    vec4 tangent;
+    vec4 bitangent;
     vec4 jointIndices;
     vec4 jointWeights;
 };
@@ -61,6 +66,8 @@ void main()
 
     outFragPos = vec3(model * vec4(v.position, 1.0));
     outNormal = mat3(transpose(inverse(model))) * v.normal;
+    outTangent = mat3(transpose(inverse(model))) * v.tangent.xyz;
+    outBitangent = mat3(transpose(inverse(model))) * v.bitangent.xyz;
 
     //output data
     gl_Position = globalUniform.projView * vec4(outFragPos, 1.0);

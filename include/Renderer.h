@@ -69,7 +69,7 @@ private:
 
     std::vector<std::pair<std::unique_ptr<Scene>, SceneData>> m_scenes;
     std::vector<Light> m_lights;
-    VulkanBuffer m_boundedLightBuffer;
+    VulkanBuffer m_lightBuffer;
 
     VkPipeline trianglePipeline;
     VkPipelineLayout trianglePipelineLayout;
@@ -104,6 +104,7 @@ private:
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedTransformBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedJointBuffers;
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedLightBuffers;
 
     Timer m_timer;
 
@@ -118,4 +119,8 @@ private:
     void initDefaultData();
 
     void createDrawDatas(VkCommandBuffer cmd);
+
+    void updateLightBuffer(VkCommandBuffer cmd);
+
+    void updateLightPos(uint32_t lightIndex);
 };

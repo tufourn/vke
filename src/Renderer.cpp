@@ -163,6 +163,12 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         } else {
             m_materials[material_i].baseTextureOffset += sceneData.textureOffset;
         }
+
+        if (m_materials[material_i].normalTextureOffset == OPAQUE_WHITE_TEXTURE) {
+            m_materials[material_i].normalTextureOffset = 0; // opaque white texture at index 0
+        } else {
+            m_materials[material_i].normalTextureOffset += sceneData.textureOffset;
+        }
     }
 
     DescriptorWriter writer;
@@ -360,8 +366,8 @@ void Renderer::terminateVulkan() {
     globalDescriptors.destroyPools(vulkanContext.device);
 
     destroyStaticBuffers();
-    if (m_boundedLightBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_boundedLightBuffer);
+    if (m_lightBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_lightBuffer);
     }
 
     vulkanContext.destroyBuffer(m_uniformBuffer);
@@ -378,6 +384,9 @@ void Renderer::terminateVulkan() {
         if (m_boundedJointBuffers[frame_i].buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_boundedJointBuffers[frame_i]);
         }
+        if (m_boundedLightBuffers[frame_i].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedLightBuffers[frame_i]);
+        }
     }
 
     vkDestroyDescriptorSetLayout(vulkanContext.device, globalDescriptorLayout, nullptr);
@@ -392,6 +401,9 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     if (m_vertices.empty()) {
         return;
     }
+
+    updateLightPos(0);
+    updateLightBuffer(cmd);
 
     createDrawDatas(cmd);
 
@@ -435,8 +447,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                        m_boundedTransformBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.writeBuffer(JOINT_BINDING, m_boundedJointBuffers[currentFrame].buffer,
                        m_boundedJointBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffer.buffer,
-                       m_boundedLightBuffer.info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffers[currentFrame].buffer,
+                       m_boundedLightBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
@@ -710,34 +722,55 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
 
 void Renderer::addLight(Light light) {
     m_lights.emplace_back(light);
+}
+
+void Renderer::updateLightBuffer(VkCommandBuffer cmd) {
     size_t lightBufferSize = m_lights.size() * sizeof(Light);
 
-    VulkanBuffer stagingBuffer = vulkanContext.createBuffer(lightBufferSize,
-                                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                            VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-    void *data = stagingBuffer.info.pMappedData;
-    memcpy(data, m_lights.data(), lightBufferSize);
-
-    if (m_boundedLightBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_boundedLightBuffer);
+    if (m_lightBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_lightBuffer);
     }
 
-    m_boundedLightBuffer = vulkanContext.createBuffer(lightBufferSize,
-                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                       VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    m_lightBuffer = vulkanContext.createBuffer(lightBufferSize,
+                                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                               VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    void *data = m_lightBuffer.info.pMappedData;
+    memcpy(data, m_lights.data(), lightBufferSize);
 
-    vulkanContext.immediateSubmit([&](VkCommandBuffer cmd) {
-        VkBufferCopy lightCopy = {0};
-        lightCopy.dstOffset = 0;
-        lightCopy.srcOffset = 0;
-        lightCopy.size = lightBufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_boundedLightBuffer.buffer,
-                        1, &lightCopy);
-    });
+    if (lightBufferSize != m_boundedLightBuffers[currentFrame].info.size) {
+        if (m_boundedLightBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedLightBuffers[currentFrame]);
+        }
+        m_boundedLightBuffers[currentFrame] = vulkanContext.createBuffer(lightBufferSize,
+                                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                         VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    }
 
-    vulkanContext.destroyBuffer(stagingBuffer);
+    VkBufferCopy lightCopy = {0};
+    lightCopy.dstOffset = 0;
+    lightCopy.srcOffset = 0;
+    lightCopy.size = lightBufferSize;
+    vkCmdCopyBuffer(cmd, m_lightBuffer.buffer, m_boundedLightBuffers[currentFrame].buffer,
+                    1, &lightCopy);
+
+
+}
+
+void Renderer::updateLightPos(uint32_t lightIndex) {
+    if (lightIndex >= m_lights.size()) {
+        std::cout << "invalid light index" << std::endl;
+        return;
+    }
+
+    float speed = 2.f;
+
+    float newX = m_lights[lightIndex].direction.x + m_timer.deltaTime() * speed;
+    if (newX >= 10) {
+        newX = -10;
+    }
+
+    m_lights[lightIndex].direction.x = newX;
 }
 

@@ -82,6 +82,13 @@ void Scene::parseMaterials(const cgltf_data *data) {
             }
         }
 
+        const cgltf_texture_view *normalTextureView = &gltfMaterial->normal_texture;
+        if (normalTextureView && normalTextureView->texture) {
+            material.normalTextureOffset = normalTextureView->texture - data->textures;
+        } else {
+            material.normalTextureOffset = OPAQUE_WHITE_TEXTURE;
+        }
+
         materials.emplace_back(material);
     }
 }
@@ -294,6 +301,10 @@ void Scene::parseMesh(const cgltf_data *data) {
             const cgltf_buffer_view *uvBufferView = nullptr;
             const std::byte *uvBuffer = nullptr;
 
+            const cgltf_accessor *tangentAccessor = nullptr;
+            const cgltf_buffer_view *tangentBufferView = nullptr;
+            const std::byte *tangentBuffer = nullptr;
+
             const cgltf_accessor *jointAccessor = nullptr;
             const cgltf_buffer_view *jointBufferView = nullptr;
             const std::byte *jointBuffer = nullptr;
@@ -336,6 +347,12 @@ void Scene::parseMesh(const cgltf_data *data) {
                         weightBuffer = static_cast<const std::byte *>(weightBufferView->buffer->data);
                         break;
                     }
+                    case cgltf_attribute_type_tangent: {
+                        tangentAccessor = gltfAttribute->data;
+                        tangentBufferView = tangentAccessor->buffer_view;
+                        tangentBuffer = static_cast<const std::byte *>(tangentBufferView->buffer->data);
+                        break;
+                    }
                     default:
                         break;
                 }
@@ -373,6 +390,17 @@ void Scene::parseMesh(const cgltf_data *data) {
                     vertex.uv_x = uv.x;
                     vertex.uv_y = uv.y;
                 }
+
+                if (tangentAccessor && tangentBufferView) {
+                    size_t tangentOffset = tangentAccessor->offset + tangentBufferView->offset +
+                                           vertex_i * tangentAccessor->stride;
+                    vertex.tangent = glm::make_vec4(reinterpret_cast<const float *>(&tangentBuffer[tangentOffset]));
+                }
+
+                vertex.bitangent =
+                        glm::vec4(glm::cross(vertex.normal,
+                                             glm::vec3(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z)),
+                                  vertex.tangent.w);
 
                 //todo joints and weights
                 if (newPrimitive.hasSkin) {
