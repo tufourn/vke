@@ -2,12 +2,8 @@
 #extension GL_EXT_buffer_reference : require
 
 layout (location = 0) out vec3 outFragPos;
-layout (location = 1) out vec3 outNormal;
-layout (location = 2) out vec2 outUV;
-layout (location = 3) out vec3 outTangent;
-layout (location = 4) out vec3 outBitangent;
-
-
+layout (location = 1) out vec2 outUV;
+layout (location = 2) out mat3 outTBN;
 
 layout(set = 0, binding = 0) uniform GlobalUniform {
     mat4 view;
@@ -65,9 +61,12 @@ void main()
     mat4 model = transform * skinMatrix;
 
     outFragPos = vec3(model * vec4(v.position, 1.0));
-    outNormal = mat3(transpose(inverse(model))) * v.normal;
-    outTangent = mat3(transpose(inverse(model))) * v.tangent.xyz;
-    outBitangent = mat3(transpose(inverse(model))) * v.bitangent.xyz;
+
+    vec3 T = normalize(mat3(model) * v.tangent.xyz);
+    vec3 B = normalize(mat3(model) * v.bitangent.xyz * v.tangent.w);
+    vec3 N = normalize(mat3(transpose(inverse(model))) * v.normal);
+
+    outTBN = mat3(T, B, N);
 
     //output data
     gl_Position = globalUniform.projView * vec4(outFragPos, 1.0);

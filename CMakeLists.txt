@@ -12,6 +12,9 @@ add_subdirectory(external/vk-bootstrap)
 # VMA
 add_subdirectory(external/VulkanMemoryAllocator)
 
+# MikkTSpace tangent calculation
+add_library(mikktspace STATIC external/MikkTSpace/mikktspace.c)
+
 # GLFW
 option(GLFW_BUILD_DOCS OFF)
 option(GLFW_BUILD_EXAMPLES OFF)
@@ -32,6 +35,7 @@ include_directories(include
         external/glm/
         external/cgltf/
         external/stb/
+        external/MikkTSpace/
 )
 
 # Sources
@@ -44,6 +48,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         vk-bootstrap::vk-bootstrap
         GPUOpen::VulkanMemoryAllocator
         imgui
+        mikktspace
         glfw)
 
 # Copy assets

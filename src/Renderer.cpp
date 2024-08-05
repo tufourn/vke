@@ -158,14 +158,14 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
 
     // make sure material points to the right texture
     for (size_t material_i = sceneData.materialOffset; material_i < m_materials.size(); material_i++) {
-        if (m_materials[material_i].baseTextureOffset == OPAQUE_WHITE_TEXTURE) {
+        if (m_materials[material_i].baseTextureOffset == NO_TEXTURE_INDEX) {
             m_materials[material_i].baseTextureOffset = 0; // opaque white texture at index 0
         } else {
             m_materials[material_i].baseTextureOffset += sceneData.textureOffset;
         }
 
-        if (m_materials[material_i].normalTextureOffset == OPAQUE_WHITE_TEXTURE) {
-            m_materials[material_i].normalTextureOffset = 0; // opaque white texture at index 0
+        if (m_materials[material_i].normalTextureOffset == NO_TEXTURE_INDEX) {
+            m_materials[material_i].normalTextureOffset = 1; // <0.5, 0.5, 1.0> texture at index 1
         } else {
             m_materials[material_i].normalTextureOffset += sceneData.textureOffset;
         }
@@ -325,7 +325,7 @@ void Renderer::setupVulkan() {
             .setShaders(triangleVertShader, triangleFragShader)
             .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .setPolygonMode(VK_POLYGON_MODE_FILL)
-            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
             .setMultisamplingNone()
             .disableBlending()
             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL)
@@ -361,6 +361,7 @@ void Renderer::terminateVulkan() {
 
     vulkanContext.destroyImage(errorTextureImage);
     vulkanContext.destroyImage(opaqueWhiteTextureImage);
+    vulkanContext.destroyImage(defaultNormalTextureImage);
     vkDestroySampler(vulkanContext.device, defaultSampler, nullptr);
 
     globalDescriptors.destroyPools(vulkanContext.device);
@@ -494,6 +495,7 @@ void Renderer::initDefaultData() {
     m_joints = {glm::mat4(1.f)};
 
     uint32_t opaqueWhite = glm::packUnorm4x8(glm::vec4(1.f, 1.f, 1.f, 1.f));
+    uint32_t defaultNormal = glm::packUnorm4x8(glm::vec4(0.5f, 0.5f, 1.f, 1.f));
     uint32_t black = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
     uint32_t magenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
 
@@ -511,6 +513,9 @@ void Renderer::initDefaultData() {
     opaqueWhiteTextureImage = vulkanContext.createImage(&opaqueWhite, VkExtent3D(1, 1, 1),
                                                         VK_FORMAT_R8G8B8A8_UNORM,
                                                         VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    defaultNormalTextureImage = vulkanContext.createImage(&defaultNormal, VkExtent3D(1, 1, 1),
+                                                        VK_FORMAT_R8G8B8A8_UNORM,
+                                                        VK_IMAGE_USAGE_SAMPLED_BIT, false);
 
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -525,6 +530,12 @@ void Renderer::initDefaultData() {
             defaultSampler
     };
 
+    Texture defaultNormalTexture = {
+            "default_normal_texture",
+            defaultNormalTextureImage.imageView,
+            defaultSampler
+    };
+
     Texture errorTexture = {
             "error_missing_texture",
             errorTextureImage.imageView,
@@ -532,6 +543,7 @@ void Renderer::initDefaultData() {
     };
 
     m_textures.emplace_back(std::make_shared<Texture>(opaqueWhiteTexture));
+    m_textures.emplace_back(std::make_shared<Texture>(defaultNormalTexture));
     m_textures.emplace_back(std::make_shared<Texture>(errorTexture));
 
     Material defaultMaterial = {
@@ -773,4 +785,3 @@ void Renderer::updateLightPos(uint32_t lightIndex) {
 
     m_lights[lightIndex].direction.x = newX;
 }
-

@@ -14,6 +14,8 @@
 #include <Utils.h>
 #include <numeric>
 
+#include "CalcTangents.h"
+
 void Scene::parseTextures(const cgltf_data *data) {
     for (auto sampler_i = 0; sampler_i < data->samplers_count; sampler_i++) {
         const cgltf_sampler *gltfSampler = &data->samplers[sampler_i];
@@ -78,7 +80,7 @@ void Scene::parseMaterials(const cgltf_data *data) {
             if (baseColorTextureView && baseColorTextureView->texture) {
                 material.baseTextureOffset = baseColorTextureView->texture - data->textures;
             } else {
-                material.baseTextureOffset = OPAQUE_WHITE_TEXTURE;
+                material.baseTextureOffset = NO_TEXTURE_INDEX;
             }
         }
 
@@ -86,7 +88,7 @@ void Scene::parseMaterials(const cgltf_data *data) {
         if (normalTextureView && normalTextureView->texture) {
             material.normalTextureOffset = normalTextureView->texture - data->textures;
         } else {
-            material.normalTextureOffset = OPAQUE_WHITE_TEXTURE;
+            material.normalTextureOffset = NO_TEXTURE_INDEX;
         }
 
         materials.emplace_back(material);
@@ -360,7 +362,10 @@ void Scene::parseMesh(const cgltf_data *data) {
 
             assert(positionBuffer &&
                            (!normalBuffer || normalAccessor->count == positionAccessor->count) &&
-                           (!uvBuffer || uvAccessor->count == positionAccessor->count)
+                           (!uvBuffer || uvAccessor->count == positionAccessor->count) &&
+                           (!tangentBuffer || tangentAccessor->count == positionAccessor->count) &&
+                           (!jointBuffer || jointAccessor->count == positionAccessor->count) &&
+                           (!weightBuffer || weightAccessor->count == positionAccessor->count)
             );
 
             newPrimitive.hasSkin = jointBuffer && weightBuffer;
@@ -377,6 +382,7 @@ void Scene::parseMesh(const cgltf_data *data) {
                     std::cerr << "Mesh primitive has no vertices" << std::endl;
                 }
 
+                // todo: handle vertices with no specified normals
                 if (normalAccessor && normalBufferView) {
                     size_t normalOffset = normalAccessor->offset + normalBufferView->offset +
                                           vertex_i * normalAccessor->stride;
@@ -395,12 +401,20 @@ void Scene::parseMesh(const cgltf_data *data) {
                     size_t tangentOffset = tangentAccessor->offset + tangentBufferView->offset +
                                            vertex_i * tangentAccessor->stride;
                     vertex.tangent = glm::make_vec4(reinterpret_cast<const float *>(&tangentBuffer[tangentOffset]));
+                    vertex.bitangent =
+                            glm::vec4(glm::cross(vertex.normal,
+                                                 glm::vec3(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z)),
+                                      vertex.tangent.w);
+                } else if (!uvAccessor && normalAccessor) {
+                    vertex.tangent =
+                            glm::vec4(glm::cross(vertex.normal, glm::vec3(1.f, 1.f, 1.f)), 1.f);
+                    vertex.bitangent =
+                            glm::vec4(
+                                    glm::cross(vertex.normal,
+                                               glm::vec3(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z)) *
+                                    vertex.tangent.w,
+                                    1.f);
                 }
-
-                vertex.bitangent =
-                        glm::vec4(glm::cross(vertex.normal,
-                                             glm::vec3(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z)),
-                                  vertex.tangent.w);
 
                 //todo joints and weights
                 if (newPrimitive.hasSkin) {
@@ -503,6 +517,21 @@ void Scene::parseMesh(const cgltf_data *data) {
 
             newPrimitive.indexCount = indexCount;
             newPrimitive.vertexCount = vertexCount;
+
+            if (!tangentAccessor && uvAccessor && normalAccessor) {
+                CalcTangents mikktspace;
+                CalcTangentData tangentData = {indexBuffer, vertexBuffer, newPrimitive};
+                mikktspace.calculate(&tangentData);
+
+                for (size_t vertex_i = newPrimitive.vertexStart; vertex_i < vertexBuffer.size(); vertex_i++) {
+                    vertexBuffer[vertex_i].bitangent =
+                            glm::vec4(glm::cross(vertexBuffer[vertex_i].normal,
+                                                 glm::vec3(vertexBuffer[vertex_i].tangent.x,
+                                                           vertexBuffer[vertex_i].tangent.y,
+                                                           vertexBuffer[vertex_i].tangent.z)),
+                                      vertexBuffer[vertex_i].tangent.w);
+                }
+            }
 
             newMesh.meshPrimitives.emplace_back(newPrimitive);
         }

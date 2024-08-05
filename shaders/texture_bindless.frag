@@ -3,10 +3,8 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 layout (location = 0) in vec3 inFragPos;
-layout (location = 1) in vec3 inNormal;
-layout (location = 2) in vec2 inUV;
-layout (location = 3) in vec3 inTangent;
-layout (location = 4) in vec3 inBiTangent;
+layout (location = 1) in vec2 inUV;
+layout (location = 2) in mat3 inTBN;
 
 layout (location = 0) out vec4 outFragColor;
 
@@ -74,33 +72,25 @@ void main()
 
     vec4 baseColor = material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
 
-    vec3 norm = texture(displayTexture[nonuniformEXT(material.normalTextureOffset)], inUV).rgb;
-    norm = normalize(norm * 2.0 - 1.0);
-
-    vec3 T = normalize(inTangent);
-    vec3 B = normalize(inBiTangent);
-    vec3 N = normalize(inNormal);
-
-    mat3 TBN = mat3(T, B, N);
-    norm = normalize(TBN * norm);
-
-    vec3 viewDir = normalize(globalUniform.cameraPos - inFragPos);
+    vec3 normalMap = texture(displayTexture[nonuniformEXT(material.normalTextureOffset)], inUV).rgb;
+    normalMap = normalize(inTBN * (normalMap * 2.0 - 1.0));
 
     for (uint i = 0; i < globalUniform.numLights; i++) {
         Light light = lights[i];
 
-        outFragColor += baseColor * 0.2; // ambient
+        outFragColor += baseColor * 0.2;// ambient
 
         vec3 lightDir = normalize(light.direction);
+        vec3 viewDir = normalize(globalUniform.cameraPos - inFragPos);
         vec3 halfwayDir = normalize(lightDir + viewDir);
 
-        float diff = max(dot(norm, lightDir), 0.0);
+        float diff = max(dot(normalMap, lightDir), 0.0);
 
         float shininess = 32;
         float spec = 0.0;
 
         if (diff > 0.0) {
-            spec = pow(max(dot(norm, halfwayDir), 0.0), shininess);
+            spec = pow(max(dot(normalMap, halfwayDir), 0.0), shininess);
         }
 
         vec4 specular = vec4(vec3(spec), 1.0);
