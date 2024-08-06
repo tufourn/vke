@@ -62,6 +62,7 @@ public:
 
     VulkanImage errorTextureImage = {};
     VulkanImage opaqueWhiteTextureImage = {};
+    VulkanImage opaqueCyanTextureImage = {};
     VulkanImage defaultNormalTextureImage = {};
     VkSampler defaultSampler = {};
 

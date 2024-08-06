@@ -9,7 +9,7 @@ layout (location = 2) in mat3 inTBN;
 layout (location = 0) out vec4 outFragColor;
 
 struct Light {
-    vec3 direction;
+    vec3 position;
     float pad;
 };
 
@@ -45,7 +45,12 @@ struct Material {
     float metallicFactor;
     float roughnessFactor;
     uint baseTextureOffset;
+    uint metallicRoughnessTextureOffset;
+
     uint normalTextureOffset;
+    uint occlusionTextureOffset;
+    uint emissiveTextureOffset;
+    float pad;
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
@@ -65,36 +70,83 @@ layout(push_constant) uniform constants
     uint jointOffset;
 } pc;
 
+float PI = 3.141592653589;
+
+float D_GGX(float NoH, float roughness) {
+    float a = NoH * roughness;
+    float k = roughness / (1.0 - NoH * NoH + a * a);
+    return k * k * (1.0 / PI);
+}
+
+float V_SmithGGXCorrelatedFast(float NoV, float NoL, float roughness) {
+    float a = roughness;
+    float GGXV = NoL * (NoV * (1.0 - a) + a);
+    float GGXL = NoV * (NoL * (1.0 - a) + a);
+    return 0.5 / (GGXV + GGXL);
+}
+
+vec3 F_Schlick(float u, vec3 f0) {
+    float f = pow(1.0 - u, 5.0);
+    return f + f0 * (1.0 - f);
+}
+
+float Fd_Lambert() {
+    return 1.0 / PI;
+}
+
 void main()
 {
     Material material = materials[pc.materialOffset];
-    outFragColor = vec4(0.0);
 
     vec4 baseColor = material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
+    vec4 metallicRoughness = texture(displayTexture[nonuniformEXT(material.metallicRoughnessTextureOffset)], inUV);
+    vec3 n = texture(displayTexture[nonuniformEXT(material.normalTextureOffset)], inUV).rgb;
 
-    vec3 normalMap = texture(displayTexture[nonuniformEXT(material.normalTextureOffset)], inUV).rgb;
-    normalMap = normalize(inTBN * (normalMap * 2.0 - 1.0));
+    // green channel for roughness
+    float perceivedRoughness = material.roughnessFactor * metallicRoughness.g;
+    float roughness = perceivedRoughness * perceivedRoughness;
+
+    // blue channel for metallic
+    float metallic = material.metallicFactor * metallicRoughness.b;
+
+    // default reflectance value per filament doc
+    float reflectance = 0.04;
+    vec3 f0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + baseColor.rgb * metallic;
+
+    // base color remapping
+    vec3 diffuseColor = (1.0 - metallic) * baseColor.rgb;
+
+    // view vector
+    vec3 v = normalize(globalUniform.cameraPos - inFragPos);
+
+    // normal vector in world space
+    n = normalize(inTBN * (n * 2.0 - 1.0));
+
+    vec3 outColor = vec3(0.0);
 
     for (uint i = 0; i < globalUniform.numLights; i++) {
         Light light = lights[i];
 
-        outFragColor += baseColor * 0.2;// ambient
+        // light vector
+        vec3 l = normalize(light.position - inFragPos);
 
-        vec3 lightDir = normalize(light.direction);
-        vec3 viewDir = normalize(globalUniform.cameraPos - inFragPos);
-        vec3 halfwayDir = normalize(lightDir + viewDir);
+        // halfway vector
+        vec3 h = normalize(l + v);
 
-        float diff = max(dot(normalMap, lightDir), 0.0);
+        float NoV = abs(dot(n, v)) + 1e-5;
+        float NoL = clamp(dot(n, l), 0.0, 1.0);
+        float NoH = clamp(dot(n, h), 0.0, 1.0);
+        float LoH = clamp(dot(l, h), 0.0, 1.0);
 
-        float shininess = 32;
-        float spec = 0.0;
+        float D = D_GGX(NoH, roughness);
+        vec3 F = F_Schlick(LoH, f0);
+        float V = V_SmithGGXCorrelatedFast(NoV, NoL, roughness);
 
-        if (diff > 0.0) {
-            spec = pow(max(dot(normalMap, halfwayDir), 0.0), shininess);
-        }
+        vec3 Fr = (D * V) * F;
+        vec3 Fd = diffuseColor; // * Fd_Lambert()
 
-        vec4 specular = vec4(vec3(spec), 1.0);
-
-        outFragColor += baseColor * diff + specular;
+        outColor += (Fd + Fr) * NoL;
     }
+
+    outFragColor = vec4(outColor, baseColor.w);
 }

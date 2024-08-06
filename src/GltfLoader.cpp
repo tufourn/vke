@@ -82,6 +82,13 @@ void Scene::parseMaterials(const cgltf_data *data) {
             } else {
                 material.baseTextureOffset = NO_TEXTURE_INDEX;
             }
+
+            const cgltf_texture_view *metallicRoughnessTextureView = &gltfMaterial->pbr_metallic_roughness.metallic_roughness_texture;
+            if (metallicRoughnessTextureView && metallicRoughnessTextureView->texture) {
+                material.metallicRoughnessTextureOffset = metallicRoughnessTextureView->texture - data->textures;
+            } else {
+                material.metallicRoughnessTextureOffset = NO_TEXTURE_INDEX;
+            }
         }
 
         const cgltf_texture_view *normalTextureView = &gltfMaterial->normal_texture;
@@ -89,6 +96,20 @@ void Scene::parseMaterials(const cgltf_data *data) {
             material.normalTextureOffset = normalTextureView->texture - data->textures;
         } else {
             material.normalTextureOffset = NO_TEXTURE_INDEX;
+        }
+
+        const cgltf_texture_view *occlusionTextureView = &gltfMaterial->occlusion_texture;
+        if (occlusionTextureView && occlusionTextureView->texture) {
+            material.occlusionTextureOffset = occlusionTextureView->texture - data->textures;
+        } else {
+            material.occlusionTextureOffset = NO_TEXTURE_INDEX;
+        }
+
+        const cgltf_texture_view *emissiveTextureView = &gltfMaterial->emissive_texture;
+        if (emissiveTextureView && emissiveTextureView->texture) {
+            material.emissiveTextureOffset = emissiveTextureView->texture - data->textures;
+        } else {
+            material.emissiveTextureOffset = NO_TEXTURE_INDEX;
         }
 
         materials.emplace_back(material);

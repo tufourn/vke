@@ -164,8 +164,14 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
             m_materials[material_i].baseTextureOffset += sceneData.textureOffset;
         }
 
+        if (m_materials[material_i].metallicRoughnessTextureOffset == NO_TEXTURE_INDEX) {
+            m_materials[material_i].metallicRoughnessTextureOffset = 1; // opaque cyan texture at index 1
+        } else {
+            m_materials[material_i].metallicRoughnessTextureOffset += sceneData.textureOffset;
+        }
+
         if (m_materials[material_i].normalTextureOffset == NO_TEXTURE_INDEX) {
-            m_materials[material_i].normalTextureOffset = 1; // <0.5, 0.5, 1.0> texture at index 1
+            m_materials[material_i].normalTextureOffset = 2; // <0.5, 0.5, 1.0> texture at index 2
         } else {
             m_materials[material_i].normalTextureOffset += sceneData.textureOffset;
         }
@@ -361,6 +367,7 @@ void Renderer::terminateVulkan() {
 
     vulkanContext.destroyImage(errorTextureImage);
     vulkanContext.destroyImage(opaqueWhiteTextureImage);
+    vulkanContext.destroyImage(opaqueCyanTextureImage);
     vulkanContext.destroyImage(defaultNormalTextureImage);
     vkDestroySampler(vulkanContext.device, defaultSampler, nullptr);
 
@@ -420,7 +427,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     scissor.extent.height = vulkanContext.windowExtent.height;
 
     glm::mat4 view = m_camera.getViewMatrix();
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.1f, 1e9f);
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.001f, 1e9f);
     projection[1][1] *= -1; // flip y
 
     m_globalUniformData.view = view;
@@ -448,8 +455,10 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                        m_boundedTransformBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.writeBuffer(JOINT_BINDING, m_boundedJointBuffers[currentFrame].buffer,
                        m_boundedJointBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffers[currentFrame].buffer,
-                       m_boundedLightBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    if (m_boundedLightBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
+        writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffers[currentFrame].buffer,
+                           m_boundedLightBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    }
     writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
@@ -494,15 +503,16 @@ void Renderer::initDefaultData() {
     m_materials.clear();
     m_joints = {glm::mat4(1.f)};
 
-    uint32_t opaqueWhite = glm::packUnorm4x8(glm::vec4(1.f, 1.f, 1.f, 1.f));
     uint32_t defaultNormal = glm::packUnorm4x8(glm::vec4(0.5f, 0.5f, 1.f, 1.f));
-    uint32_t black = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
-    uint32_t magenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
+    uint32_t opaqueWhite = glm::packUnorm4x8(glm::vec4(1.f, 1.f, 1.f, 1.f));
+    uint32_t opaqueBlack = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
+    uint32_t opaqueMagenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
+    uint32_t opaqueCyan = glm::packUnorm4x8(glm::vec4(0.f, 1.f, 1.f, 1.f));
 
     std::array<uint32_t, 8 * 8> checker = {};
     for (size_t x = 0; x < 8; x++) {
         for (size_t y = 0; y < 8; y++) {
-            checker[y * 8 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+            checker[y * 8 + x] = ((x % 2) ^ (y % 2)) ? opaqueMagenta : opaqueBlack;
         }
     }
 
@@ -514,8 +524,11 @@ void Renderer::initDefaultData() {
                                                         VK_FORMAT_R8G8B8A8_UNORM,
                                                         VK_IMAGE_USAGE_SAMPLED_BIT, false);
     defaultNormalTextureImage = vulkanContext.createImage(&defaultNormal, VkExtent3D(1, 1, 1),
-                                                        VK_FORMAT_R8G8B8A8_UNORM,
-                                                        VK_IMAGE_USAGE_SAMPLED_BIT, false);
+                                                          VK_FORMAT_R8G8B8A8_UNORM,
+                                                          VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    opaqueCyanTextureImage = vulkanContext.createImage(&opaqueCyan, VkExtent3D(1, 1, 1),
+                                                       VK_FORMAT_R8G8B8A8_UNORM,
+                                                       VK_IMAGE_USAGE_SAMPLED_BIT, false);
 
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -536,6 +549,12 @@ void Renderer::initDefaultData() {
             defaultSampler
     };
 
+    Texture opaqueCyanTexture = {
+            "opaque_cyan_texture",
+            opaqueCyanTextureImage.imageView,
+            defaultSampler
+    };
+
     Texture errorTexture = {
             "error_missing_texture",
             errorTextureImage.imageView,
@@ -543,14 +562,16 @@ void Renderer::initDefaultData() {
     };
 
     m_textures.emplace_back(std::make_shared<Texture>(opaqueWhiteTexture));
+    m_textures.emplace_back(std::make_shared<Texture>(opaqueCyanTexture));
     m_textures.emplace_back(std::make_shared<Texture>(defaultNormalTexture));
-    m_textures.emplace_back(std::make_shared<Texture>(errorTexture));
 
     Material defaultMaterial = {
             .baseColorFactor = {1.f, 1.f, 1.f, 1.f},
             .metallicFactor = 1.f,
             .roughnessFactor = 1.f,
             .baseTextureOffset = 0,  // the default opaque white texture is at index 0
+            .metallicRoughnessTextureOffset = 1, // the default roughness texture is at index 1
+            .normalTextureOffset = 2, // the default normal texture is at index 2
     };
 
     m_materials.emplace_back(defaultMaterial);
@@ -737,6 +758,10 @@ void Renderer::addLight(Light light) {
 }
 
 void Renderer::updateLightBuffer(VkCommandBuffer cmd) {
+    if (m_lights.empty()) {
+        return;
+    }
+
     size_t lightBufferSize = m_lights.size() * sizeof(Light);
 
     if (m_lightBuffer.buffer != VK_NULL_HANDLE) {
@@ -778,10 +803,10 @@ void Renderer::updateLightPos(uint32_t lightIndex) {
 
     float speed = 2.f;
 
-    float newX = m_lights[lightIndex].direction.x + m_timer.deltaTime() * speed;
+    float newX = m_lights[lightIndex].position.x + m_timer.deltaTime() * speed;
     if (newX >= 10) {
         newX = -10;
     }
 
-    m_lights[lightIndex].direction.x = newX;
+    m_lights[lightIndex].position.x = newX;
 }

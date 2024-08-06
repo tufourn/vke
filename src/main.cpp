@@ -5,11 +5,11 @@ int main() {
 
     //todo: implement proper lighting system
     Light pointLight0 = {};
-    pointLight0.direction = {10.f, 10.f, 10.f};
+    pointLight0.position = {-10.f, 10.f, 10.f};
     renderer.addLight(pointLight0);
 
 //    Light pointLight1 = {};
-//    pointLight1.direction = {-5.f, 10.f, 10.f};
+//    pointLight1.position = {-5.f, 10.f, -10.f};
 //
 //    renderer.addLight(pointLight1);
 
@@ -24,7 +24,9 @@ int main() {
 //    renderer.loadGltf("assets/models/tests/OrientationTest.gltf");
 //    renderer.loadGltf("assets/models/Sponza/glTF/Sponza.gltf");
 //    renderer.loadGltf("assets/models/triangle/Triangle.gltf");
-    renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
+//    renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
+    renderer.loadGltf("assets/models/tests/MetalRoughSpheres.gltf");
+//    renderer.loadGltf("assets/models/tests/MetalRoughSpheresNoTextures.gltf"); // wrong transformation?
 //    renderer.loadGltf("assets/models/tests/NormalTangentMirrorTest.gltf");
 //    renderer.loadGltf("assets/models/tests/NormalTangentTest.gltf");
 //    renderer.loadGltf("assets/models/tests/TextureSettingsTest.gltf");

@@ -56,10 +56,16 @@ struct Texture {
 
 struct Material {
     glm::vec4 baseColorFactor = {1.f, 1.f, 1.f, 1.f};
+
     float metallicFactor = 1.f;
     float roughnessFactor = 1.f;
     uint32_t baseTextureOffset = 0;
+    uint32_t metallicRoughnessTextureOffset = 0;
+
     uint32_t normalTextureOffset = 0;
+    uint32_t occlusionTextureOffset = 0;
+    uint32_t emissiveTextureOffset = 0;
+    float pad;
 };
 
 struct MeshPrimitive {
@@ -144,6 +150,6 @@ struct Skin {
 };
 
 struct Light {
-    glm::vec3 direction;
+    glm::vec3 position;
     float pad;
 };
