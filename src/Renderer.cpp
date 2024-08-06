@@ -534,6 +534,8 @@ void Renderer::initDefaultData() {
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.minFilter = VK_FILTER_NEAREST;
     samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.maxLod = 16.f;
 
     vkCreateSampler(vulkanContext.device, &samplerInfo, nullptr, &defaultSampler);
 

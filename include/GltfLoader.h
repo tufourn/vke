@@ -74,3 +74,5 @@ static VkFilter extractGltfMagFilter(int gltfMagFilter);
 static VkFilter extractGltfMinFilter(int gltfMinFilter);
 
 static VkSamplerAddressMode extractGltfWrapMode(int gltfWrap);
+
+static VkSamplerMipmapMode extractGltfMipmapMode(int gltfMinFilter);

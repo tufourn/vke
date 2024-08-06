@@ -260,7 +260,7 @@ VulkanImage VulkanContext::createImage(VkExtent3D extent,
 
     VkImageCreateInfo imgInfo = VkInit::imageCreateInfo(format, usage, extent);
     if (mipmapped) {
-        imgInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height))));
+        imgInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height)))) + 1;
     }
 
     VmaAllocationCreateInfo allocInfo = {};
@@ -366,12 +366,16 @@ VulkanImage VulkanContext::createImage(const void *data, VkExtent3D extent, VkFo
         vkCmdCopyBufferToImage(cmd, uploadBuffer.buffer, newImage.image,
                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
-        VkUtil::transitionImage(cmd, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
+        if (mipmapped) {
+            VkUtil::generateMipmaps(cmd, newImage.image, {newImage.imageExtent.width, newImage.imageExtent.height});
+        } else {
+            VkUtil::transitionImage(cmd, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                    VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                    VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
+        }
     });
 
     destroyBuffer(uploadBuffer);

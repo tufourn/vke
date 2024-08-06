@@ -25,6 +25,8 @@ void Scene::parseTextures(const cgltf_data *data) {
         samplerInfo.magFilter = extractGltfMagFilter(gltfSampler->mag_filter);
         samplerInfo.addressModeU = extractGltfWrapMode(gltfSampler->wrap_s);
         samplerInfo.addressModeV = extractGltfWrapMode(gltfSampler->wrap_t);
+        samplerInfo.mipmapMode = extractGltfMipmapMode(gltfSampler->min_filter);
+        samplerInfo.maxLod = 16;
 
         VkSampler sampler;
         vkCreateSampler(renderer->vulkanContext.device, &samplerInfo, nullptr, &sampler);
@@ -159,6 +161,21 @@ VkSamplerAddressMode extractGltfWrapMode(int gltfWrap) {
     }
 }
 
+VkSamplerMipmapMode extractGltfMipmapMode(int gltfMinFilter) {
+    switch (gltfMinFilter) {
+        case 9984:
+            return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        case 9985:
+            return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        case 9986:
+            return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        case 9987:
+            return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        default:
+            return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    }
+}
+
 Scene::Scene(Renderer *renderer) : renderer(renderer) {
 }
 
@@ -250,7 +267,7 @@ void Scene::parseImages(const cgltf_data *data) {
 
                     newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                                   false);
+                                                                   true);
 
                     images.emplace_back(newImage);
 
@@ -273,7 +290,7 @@ void Scene::parseImages(const cgltf_data *data) {
 
                     newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                                   false);
+                                                                   true);
 
                     images.emplace_back(newImage);
 

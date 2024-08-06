@@ -143,10 +143,14 @@ void main()
         float V = V_SmithGGXCorrelatedFast(NoV, NoL, roughness);
 
         vec3 Fr = (D * V) * F;
-        vec3 Fd = diffuseColor; // * Fd_Lambert()
+        vec3 Fd = diffuseColor;// * Fd_Lambert()
 
         outColor += (Fd + Fr) * NoL;
     }
 
     outFragColor = vec4(outColor, baseColor.w);
+
+//    mipmapping tint test
+//    float lod = textureQueryLod(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV).x;
+//    outFragColor += vec4(0.2, 0.0, 0.0, 0.0) * lod;
 }

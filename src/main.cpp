@@ -22,10 +22,10 @@ int main() {
 //    renderer.loadGltf("assets/models/tests/RecursiveSkeletons.gltf");
 //    renderer.loadGltf("assets/models/box/BoxAnimated.gltf");
 //    renderer.loadGltf("assets/models/tests/OrientationTest.gltf");
-//    renderer.loadGltf("assets/models/Sponza/glTF/Sponza.gltf");
+    renderer.loadGltf("assets/models/Sponza/glTF/Sponza.gltf");
 //    renderer.loadGltf("assets/models/triangle/Triangle.gltf");
 //    renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
-    renderer.loadGltf("assets/models/tests/MetalRoughSpheres.gltf");
+//    renderer.loadGltf("assets/models/tests/MetalRoughSpheres.gltf");
 //    renderer.loadGltf("assets/models/tests/MetalRoughSpheresNoTextures.gltf"); // wrong transformation?
 //    renderer.loadGltf("assets/models/tests/NormalTangentMirrorTest.gltf");
 //    renderer.loadGltf("assets/models/tests/NormalTangentTest.gltf");
