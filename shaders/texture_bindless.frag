@@ -51,6 +51,9 @@ struct Material {
     uint occlusionTextureOffset;
     uint emissiveTextureOffset;
     float pad;
+
+    vec3 emissiveFactor;
+    float pad1;
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
@@ -69,6 +72,26 @@ layout(push_constant) uniform constants
     uint materialOffset;
     uint jointOffset;
 } pc;
+
+// Converts a color from linear light gamma to sRGB gamma
+vec4 fromLinear(vec4 linearRGB)
+{
+    bvec3 cutoff = lessThan(linearRGB.rgb, vec3(0.0031308));
+    vec3 higher = vec3(1.055)*pow(linearRGB.rgb, vec3(1.0/2.4)) - vec3(0.055);
+    vec3 lower = linearRGB.rgb * vec3(12.92);
+
+    return vec4(mix(higher, lower, cutoff), linearRGB.a);
+}
+
+// Converts a color from sRGB gamma to linear light gamma
+vec4 toLinear(vec4 sRGB)
+{
+    bvec3 cutoff = lessThan(sRGB.rgb, vec3(0.04045));
+    vec3 higher = pow((sRGB.rgb + vec3(0.055))/vec3(1.055), vec3(2.4));
+    vec3 lower = sRGB.rgb/vec3(12.92);
+
+    return vec4(mix(higher, lower, cutoff), sRGB.a);
+}
 
 float PI = 3.141592653589;
 
@@ -98,12 +121,13 @@ void main()
 {
     Material material = materials[pc.materialOffset];
 
-    vec4 baseColor = material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV);
+    vec4 baseColor = toLinear(material.baseColorFactor * texture(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV));
     vec4 metallicRoughness = texture(displayTexture[nonuniformEXT(material.metallicRoughnessTextureOffset)], inUV);
+    vec3 emissive = toLinear(vec4(material.emissiveFactor, 1.0) * texture(displayTexture[nonuniformEXT(material.emissiveTextureOffset)], inUV)).rgb;
     vec3 n = texture(displayTexture[nonuniformEXT(material.normalTextureOffset)], inUV).rgb;
 
-    // green channel for roughness
-    float perceivedRoughness = material.roughnessFactor * metallicRoughness.g;
+    // green channel for roughness, clamped to 0.089 to avoid division by 0
+    float perceivedRoughness = clamp(material.roughnessFactor * metallicRoughness.g, 0.089, 1.0);
     float roughness = perceivedRoughness * perceivedRoughness;
 
     // blue channel for metallic
@@ -148,7 +172,8 @@ void main()
         outColor += (Fd + Fr) * NoL;
     }
 
-    outFragColor = vec4(outColor, baseColor.w);
+    outColor += emissive;
+    outFragColor = fromLinear(vec4(outColor, baseColor.a));
 
 //    mipmapping tint test
 //    float lod = textureQueryLod(displayTexture[nonuniformEXT(material.baseTextureOffset)], inUV).x;

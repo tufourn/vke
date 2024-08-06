@@ -77,6 +77,7 @@ void Scene::parseMaterials(const cgltf_data *data) {
             material.baseColorFactor = glm::make_vec4(gltfMetallicRoughness->base_color_factor);
             material.metallicFactor = gltfMetallicRoughness->metallic_factor;
             material.roughnessFactor = gltfMetallicRoughness->roughness_factor;
+            material.emissiveFactor = glm::make_vec3(gltfMaterial->emissive_factor);
 
             const cgltf_texture_view *baseColorTextureView = &gltfMaterial->pbr_metallic_roughness.base_color_texture;
             if (baseColorTextureView && baseColorTextureView->texture) {

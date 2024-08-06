@@ -165,7 +165,7 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         }
 
         if (m_materials[material_i].metallicRoughnessTextureOffset == NO_TEXTURE_INDEX) {
-            m_materials[material_i].metallicRoughnessTextureOffset = 1; // opaque cyan texture at index 1
+            m_materials[material_i].metallicRoughnessTextureOffset = 1; // <0.0, 1.0, 1.0> texture at index 1
         } else {
             m_materials[material_i].metallicRoughnessTextureOffset += sceneData.textureOffset;
         }
@@ -174,6 +174,18 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
             m_materials[material_i].normalTextureOffset = 2; // <0.5, 0.5, 1.0> texture at index 2
         } else {
             m_materials[material_i].normalTextureOffset += sceneData.textureOffset;
+        }
+
+        if (m_materials[material_i].emissiveTextureOffset == NO_TEXTURE_INDEX) {
+            m_materials[material_i].emissiveTextureOffset = 0; // opaque white texture at index 0
+        } else {
+            m_materials[material_i].emissiveTextureOffset += sceneData.textureOffset;
+        }
+
+        if (m_materials[material_i].occlusionTextureOffset == NO_TEXTURE_INDEX) {
+            m_materials[material_i].occlusionTextureOffset = 0; // opaque white texture at index 0
+        } else {
+            m_materials[material_i].occlusionTextureOffset += sceneData.textureOffset;
         }
     }
 

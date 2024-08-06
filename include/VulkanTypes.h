@@ -66,6 +66,9 @@ struct Material {
     uint32_t occlusionTextureOffset = 0;
     uint32_t emissiveTextureOffset = 0;
     float pad;
+
+    glm::vec3 emissiveFactor = glm::vec3(0.f);
+    float pad1;
 };
 
 struct MeshPrimitive {
