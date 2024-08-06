@@ -137,60 +137,60 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         return;
     }
 
-    SceneData sceneData = {};
+    ModelData modelData = {};
 
-    sceneData.vertexOffset = m_vertices.size();
+    modelData.vertexOffset = m_vertices.size();
     m_vertices.insert(m_vertices.end(), scene->vertexBuffer.begin(), scene->vertexBuffer.end());
 
-    sceneData.indexOffset = m_indices.size();
+    modelData.indexOffset = m_indices.size();
     m_indices.insert(m_indices.end(), scene->indexBuffer.begin(), scene->indexBuffer.end());
 
     // make sure index points to the right vertex
-    for (size_t index_i = sceneData.indexOffset; index_i < m_indices.size(); index_i++) {
-        m_indices[index_i] += sceneData.vertexOffset;
+    for (size_t index_i = modelData.indexOffset; index_i < m_indices.size(); index_i++) {
+        m_indices[index_i] += modelData.vertexOffset;
     }
 
-    sceneData.textureOffset = m_textures.size();
+    modelData.textureOffset = m_textures.size();
     m_textures.insert(m_textures.end(), scene->textures.begin(), scene->textures.end());
 
-    sceneData.materialOffset = m_materials.size();
+    modelData.materialOffset = m_materials.size();
     m_materials.insert(m_materials.end(), scene->materials.begin(), scene->materials.end());
 
     // make sure material points to the right texture
-    for (size_t material_i = sceneData.materialOffset; material_i < m_materials.size(); material_i++) {
+    for (size_t material_i = modelData.materialOffset; material_i < m_materials.size(); material_i++) {
         if (m_materials[material_i].baseTextureOffset == NO_TEXTURE_INDEX) {
             m_materials[material_i].baseTextureOffset = 0; // opaque white texture at index 0
         } else {
-            m_materials[material_i].baseTextureOffset += sceneData.textureOffset;
+            m_materials[material_i].baseTextureOffset += modelData.textureOffset;
         }
 
         if (m_materials[material_i].metallicRoughnessTextureOffset == NO_TEXTURE_INDEX) {
             m_materials[material_i].metallicRoughnessTextureOffset = 1; // <0.0, 1.0, 1.0> texture at index 1
         } else {
-            m_materials[material_i].metallicRoughnessTextureOffset += sceneData.textureOffset;
+            m_materials[material_i].metallicRoughnessTextureOffset += modelData.textureOffset;
         }
 
         if (m_materials[material_i].normalTextureOffset == NO_TEXTURE_INDEX) {
             m_materials[material_i].normalTextureOffset = 2; // <0.5, 0.5, 1.0> texture at index 2
         } else {
-            m_materials[material_i].normalTextureOffset += sceneData.textureOffset;
+            m_materials[material_i].normalTextureOffset += modelData.textureOffset;
         }
 
         if (m_materials[material_i].emissiveTextureOffset == NO_TEXTURE_INDEX) {
             m_materials[material_i].emissiveTextureOffset = 0; // opaque white texture at index 0
         } else {
-            m_materials[material_i].emissiveTextureOffset += sceneData.textureOffset;
+            m_materials[material_i].emissiveTextureOffset += modelData.textureOffset;
         }
 
         if (m_materials[material_i].occlusionTextureOffset == NO_TEXTURE_INDEX) {
             m_materials[material_i].occlusionTextureOffset = 0; // opaque white texture at index 0
         } else {
-            m_materials[material_i].occlusionTextureOffset += sceneData.textureOffset;
+            m_materials[material_i].occlusionTextureOffset += modelData.textureOffset;
         }
     }
 
     DescriptorWriter writer;
-    for (size_t texture_i = sceneData.textureOffset; texture_i < m_textures.size(); texture_i++) {
+    for (size_t texture_i = modelData.textureOffset; texture_i < m_textures.size(); texture_i++) {
         writer.writeImage(TEXTURE_BINDING, m_textures[texture_i]->imageview, m_textures[texture_i]->sampler,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                           texture_i);
@@ -199,7 +199,7 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
     }
 
-    m_scenes.emplace_back(std::move(scene), sceneData);
+    m_sceneDatas.emplace_back(std::move(scene), modelData);
 
     destroyStaticBuffers();
     createStaticBuffers();
@@ -343,7 +343,7 @@ void Renderer::setupVulkan() {
             .setShaders(triangleVertShader, triangleFragShader)
             .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .setPolygonMode(VK_POLYGON_MODE_FILL)
-            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .setMultisamplingNone()
             .disableBlending()
             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL)
@@ -375,7 +375,7 @@ void Renderer::terminateVulkan() {
     vkDeviceWaitIdle(vulkanContext.device);
 
     // todo: move memory allocation stuff in scene to renderer
-    m_scenes.clear();
+    m_sceneDatas.clear();
 
     vulkanContext.destroyImage(errorTextureImage);
     vulkanContext.destroyImage(opaqueWhiteTextureImage);
@@ -489,24 +489,21 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     PushConstantsBindless pcb = {};
     pcb.vertexBuffer = vulkanContext.getBufferAddress(m_boundedVertexBuffer);
 
-    for (const auto &scene: m_scenes) {
-        for (const auto &drawData: scene.second.drawDatas) {
-            pcb.transformOffset = drawData.transformOffset;
-            pcb.materialOffset = drawData.materialOffset;
-            pcb.jointOffset = drawData.jointOffset;
+    for (const auto &drawData: m_drawDatas) {
+        pcb.transformOffset = drawData.transformOffset;
+        pcb.materialOffset = drawData.materialOffset;
+        pcb.jointOffset = drawData.jointOffset;
 
-            vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0,
-                               sizeof(PushConstantsBindless),
-                               &pcb);
-            if (drawData.hasIndices) {
-                vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
-            } else {
-                vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
-            }
+        vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0,
+                           sizeof(PushConstantsBindless),
+                           &pcb);
+        if (drawData.hasIndices) {
+            vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
+        } else {
+            vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
         }
     }
-
     vkCmdEndRendering(cmd);
 }
 
@@ -616,21 +613,20 @@ void Renderer::destroyStaticBuffers() {
 void Renderer::createDrawDatas(VkCommandBuffer cmd) {
     m_transforms.clear();
     m_joints = {glm::mat4(1.f)}; // joint index zero is identity matrix
+    m_drawDatas.clear();
 
-    for (auto &scenePair: m_scenes) {
+    for (auto &scenePair: m_sceneDatas) {
         auto scene = scenePair.first.get();
-        auto &sceneData = scenePair.second;
+        auto &modelData = scenePair.second;
 
         scene->updateAnimation(m_timer.deltaTime());
 
-        sceneData.jointOffset = m_joints.size();
+        modelData.jointOffset = m_joints.size();
         size_t numSceneJoints = 0;
         for (const auto &num: scene->skinJointCounts) {
             numSceneJoints += num;
         }
         m_joints.resize(m_joints.size() + numSceneJoints);
-
-        sceneData.drawDatas.clear();
 
         // update world transform of nodes
         for (const auto &topLevelNode: scene->topLevelNodes) {
@@ -665,7 +661,7 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                     glm::mat4 inverseWorldTransform = glm::inverse(currentNode->worldTransform);
                     const Skin *skin = scene->skins[currentNode->skin].get();
                     for (size_t joint_i = 0; joint_i < skin->jointNodeIndices.size(); joint_i++) {
-                        m_joints[sceneData.jointOffset + scene->jointOffsets[currentNode->skin] + joint_i] =
+                        m_joints[modelData.jointOffset + scene->jointOffsets[currentNode->skin] + joint_i] =
                                 inverseWorldTransform * scene->nodes[skin->jointNodeIndices[joint_i]]->worldTransform *
                                 skin->inverseBindMatrices[joint_i];
                     }
@@ -675,22 +671,22 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                     for (const auto &meshPrimitive: nodeMesh->meshPrimitives) {
                         DrawData drawData = {};
                         drawData.hasIndices = meshPrimitive.hasIndices;
-                        drawData.indexOffset = meshPrimitive.indexStart + sceneData.indexOffset;
-                        drawData.vertexOffset = meshPrimitive.vertexStart + sceneData.vertexOffset;
+                        drawData.indexOffset = meshPrimitive.indexStart + modelData.indexOffset;
+                        drawData.vertexOffset = meshPrimitive.vertexStart + modelData.vertexOffset;
                         drawData.indexCount = meshPrimitive.indexCount;
                         drawData.vertexCount = meshPrimitive.vertexCount;
-                        if (meshPrimitive.materialOffset == DEFAULT_MATERIAL) {
+                        if (meshPrimitive.materialOffset == NO_MATERIAL_INDEX) {
                             drawData.materialOffset = 0; // default material at index 0
                         } else {
-                            drawData.materialOffset = meshPrimitive.materialOffset + sceneData.materialOffset;
+                            drawData.materialOffset = meshPrimitive.materialOffset + modelData.materialOffset;
                         }
                         drawData.transformOffset = m_transforms.size();
                         if (currentNode->hasSkin) {
-                            drawData.jointOffset = scene->jointOffsets[currentNode->skin] + sceneData.jointOffset;
+                            drawData.jointOffset = scene->jointOffsets[currentNode->skin] + modelData.jointOffset;
                         } else {
                             drawData.jointOffset = 0;
                         }
-                        sceneData.drawDatas.emplace_back(drawData);
+                        m_drawDatas.emplace_back(drawData);
                     }
                     m_transforms.emplace_back(currentNode->worldTransform);
                 }
@@ -701,6 +697,29 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
             }
         }
     }
+
+    for (auto &generatedMeshPair : m_generatedMeshDatas) {
+        auto& meshBuffers = generatedMeshPair.first;
+        auto& modelData = generatedMeshPair.second;
+        DrawData drawData = {};
+
+        drawData.hasIndices = true;
+        drawData.indexOffset = modelData.indexOffset;
+        drawData.vertexOffset = modelData.vertexOffset;
+        drawData.indexCount = meshBuffers->indices.size();
+        drawData.vertexCount = meshBuffers->vertices.size();
+
+        // todo: use default material and texture for now
+        drawData.materialOffset = 0;
+        drawData.jointOffset = 0;
+
+        // todo: implement instances and model transformations
+        drawData.transformOffset = m_transforms.size();
+        m_transforms.emplace_back(1.f);
+
+        m_drawDatas.emplace_back(drawData);
+    }
+
 
     // (re)create buffers if size changes
     uint32_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
@@ -823,4 +842,28 @@ void Renderer::updateLightPos(uint32_t lightIndex) {
     }
 
     m_lights[lightIndex].position.x = newX;
+}
+
+void Renderer::loadGeneratedMesh(MeshBuffers *meshBuffer) {
+    ModelData modelData = {};
+
+    modelData.vertexOffset = m_vertices.size();
+    m_vertices.insert(m_vertices.end(), meshBuffer->vertices.begin(), meshBuffer->vertices.end());
+
+    modelData.indexOffset = m_indices.size();
+    m_indices.insert(m_indices.end(), meshBuffer->indices.begin(), meshBuffer->indices.end());
+
+    // make sure index points to the right vertex
+    for (size_t index_i = modelData.indexOffset; index_i < m_indices.size(); index_i++) {
+        m_indices[index_i] += modelData.vertexOffset;
+    }
+
+    // todo: use default material and textures for now, implement properly later
+    modelData.textureOffset = 0;
+    modelData.materialOffset = 0;
+
+    m_generatedMeshDatas.emplace_back(meshBuffer, modelData);
+
+    destroyStaticBuffers();
+    createStaticBuffers();
 }

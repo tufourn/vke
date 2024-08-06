@@ -551,7 +551,7 @@ void Scene::parseMesh(const cgltf_data *data) {
             if (gltfPrimitive->material) {
                 newPrimitive.materialOffset = gltfPrimitive->material - data->materials;
             } else {
-                newPrimitive.materialOffset = DEFAULT_MATERIAL;
+                newPrimitive.materialOffset = NO_MATERIAL_INDEX;
             }
 
             newPrimitive.indexCount = indexCount;

@@ -13,6 +13,12 @@ int main() {
 //
 //    renderer.addLight(pointLight1);
 
+//    MeshBuffers cubeMesh = createCubeMesh(2.0, 2.0, 2.0);
+//    renderer.loadGeneratedMesh(&cubeMesh);
+
+    MeshBuffers sphereMesh = createSphereMesh(1.0, 20, 20);
+    renderer.loadGeneratedMesh(&sphereMesh);
+
 //    renderer.loadGltf("assets/models/milk_truck/CesiumMilkTruck.gltf");
 //    renderer.loadGltf("assets/models/box/BoxTextured.gltf");
 //    renderer.loadGltf("assets/models/cesium_man/CesiumMan.gltf");
@@ -24,7 +30,7 @@ int main() {
 //    renderer.loadGltf("assets/models/tests/OrientationTest.gltf");
 //    renderer.loadGltf("assets/models/Sponza/glTF/Sponza.gltf");
 //    renderer.loadGltf("assets/models/triangle/Triangle.gltf");
-    renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
+//    renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
 //    renderer.loadGltf("assets/models/tests/MetalRoughSpheres.gltf");
 //    renderer.loadGltf("assets/models/tests/MetalRoughSpheresNoTextures.gltf"); // wrong transformation?
 //    renderer.loadGltf("assets/models/tests/NormalTangentMirrorTest.gltf");

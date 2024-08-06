@@ -10,6 +10,9 @@
 #include <string>
 #include <memory>
 
+constexpr uint32_t NO_MATERIAL_INDEX = UINT32_MAX;
+constexpr uint32_t NO_TEXTURE_INDEX = UINT32_MAX;
+
 struct VulkanFeatures {
     bool dynamicRendering = true;
     bool synchronization2 = true;
@@ -45,7 +48,7 @@ struct Vertex {
     glm::vec4 tangent;
     glm::vec4 bitangent;
     glm::vec4 jointIndices; // max 4 joints
-    glm::vec4 jointWeights;
+    glm::vec4 jointWeights = {1, 0, 0, 0};
 };
 
 struct Texture {

@@ -4,7 +4,9 @@
 #include <VulkanContext.h>
 #include <GltfLoader.h>
 #include "Timer.h"
+#include "MeshGenerator.h"
 
+// todo
 struct Stats {
     float frameTime;
 };
@@ -17,6 +19,7 @@ struct PushConstantsBindless {
     uint32_t jointOffset;
 };
 
+// holds draw parameters
 struct DrawData {
     uint32_t indexOffset;
     uint32_t vertexOffset;
@@ -28,12 +31,12 @@ struct DrawData {
     bool hasIndices;
 };
 
-struct SceneData {
+// holds model buffer offset information
+struct ModelData {
     uint32_t indexOffset;
     uint32_t vertexOffset;
     uint32_t textureOffset;
     uint32_t materialOffset;
-    std::vector<DrawData> drawDatas;
     uint32_t jointOffset;
 };
 
@@ -56,6 +59,8 @@ public:
 
     void loadGltf(std::filesystem::path filePath);
 
+    void loadGeneratedMesh(MeshBuffers *meshBuffer);
+
     void addLight(Light light);
 
     VulkanContext vulkanContext;
@@ -69,7 +74,11 @@ public:
 private:
     uint32_t currentFrame = 0;
 
-    std::vector<std::pair<std::unique_ptr<Scene>, SceneData>> m_scenes;
+    std::vector<std::pair<std::unique_ptr<Scene>, ModelData>> m_sceneDatas;
+    std::vector<std::pair<MeshBuffers *, ModelData>> m_generatedMeshDatas;
+
+    std::vector<DrawData> m_drawDatas;
+
     std::vector<Light> m_lights;
     VulkanBuffer m_lightBuffer;
 
@@ -92,6 +101,7 @@ private:
     VulkanBuffer m_boundedMaterialBuffer;
 
     void destroyStaticBuffers();
+
     void createStaticBuffers();
 
     GlobalUniformData m_globalUniformData;
