@@ -6,6 +6,8 @@
 #include "Timer.h"
 #include "MeshGenerator.h"
 
+constexpr uint32_t LOAD_FAILED = UINT32_MAX;
+
 // todo
 struct Stats {
     float frameTime;
@@ -17,9 +19,12 @@ struct PushConstantsBindless {
     uint32_t transformOffset;
     uint32_t materialOffset;
     uint32_t jointOffset;
+
+    uint32_t modelTransformOffset;
+    float pad[3];
 };
 
-// holds draw parameters
+// holds draw command parameters: offsets for the bounded buffers and instance count
 struct DrawData {
     uint32_t indexOffset;
     uint32_t vertexOffset;
@@ -28,16 +33,26 @@ struct DrawData {
     uint32_t vertexCount;
     uint32_t materialOffset;
     uint32_t jointOffset;
+    uint32_t modelTransformOffset;
+    uint32_t instanceCount;
     bool hasIndices;
 };
 
-// holds model buffer offset information
+// holds model buffer offset information and number of DrawData objects
 struct ModelData {
     uint32_t indexOffset;
     uint32_t vertexOffset;
     uint32_t textureOffset;
     uint32_t materialOffset;
     uint32_t jointOffset;
+    uint32_t drawDataOffset;
+    uint32_t drawDataCount;
+};
+
+// holds information for render objects, currently only the model matrix
+struct RenderObjectInfo {
+    glm::mat4 modelMatrix;
+    uint32_t modelId;
 };
 
 struct GlobalUniformData {
@@ -57,9 +72,11 @@ public:
 
     void run();
 
-    void loadGltf(std::filesystem::path filePath);
+    uint32_t loadGltf(std::filesystem::path filePath);
 
-    void loadGeneratedMesh(MeshBuffers *meshBuffer);
+    uint32_t loadGeneratedMesh(MeshBuffers *meshBuffer);
+
+    uint32_t addRenderObject(RenderObjectInfo info);
 
     void addLight(Light light);
 
@@ -74,9 +91,18 @@ public:
 private:
     uint32_t currentFrame = 0;
 
-    std::vector<std::pair<std::unique_ptr<Scene>, ModelData>> m_sceneDatas;
-    std::vector<std::pair<MeshBuffers *, ModelData>> m_generatedMeshDatas;
+    uint32_t getLoadedModelId();
+    uint32_t getRenderObjectId();
 
+    uint32_t m_loadedModelCount = 0;
+    uint32_t m_renderObjectCount = 0;
+
+    std::vector<std::pair<uint32_t, RenderObjectInfo>> m_renderObjects;
+
+    std::vector<std::pair<std::unique_ptr<Scene>, uint32_t>> m_sceneDatas;
+    std::vector<std::pair<MeshBuffers *, uint32_t>> m_generatedMeshDatas;
+
+    std::vector<ModelData> m_modelDatas;
     std::vector<DrawData> m_drawDatas;
 
     std::vector<Light> m_lights;
@@ -113,10 +139,14 @@ private:
     std::vector<glm::mat4> m_joints;
     VulkanBuffer m_jointBuffer;
 
+    std::vector<glm::mat4> m_modelTransforms;
+    VulkanBuffer m_modelTransformBuffer;
+
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedUniformBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedTransformBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedJointBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedLightBuffers;
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedModelTransformBuffer;
 
     Timer m_timer;
 

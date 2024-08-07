@@ -14,8 +14,9 @@ static constexpr uint32_t UNIFORM_BINDING = 0;
 static constexpr uint32_t TRANSFORM_BINDING = 1;
 static constexpr uint32_t MATERIAL_BINDING = 2;
 static constexpr uint32_t JOINT_BINDING = 3;
-static constexpr uint32_t LIGHT_BINDING = 4;
-static constexpr uint32_t TEXTURE_BINDING = 5;
+static constexpr uint32_t MODEL_TRANSFORM_BINDING = 4;
+static constexpr uint32_t LIGHT_BINDING = 5;
+static constexpr uint32_t TEXTURE_BINDING = 6;
 
 Renderer::Renderer() {
     setupVulkan();
@@ -129,13 +130,15 @@ void Renderer::run() {
     }
 }
 
-void Renderer::loadGltf(std::filesystem::path filePath) {
+uint32_t Renderer::loadGltf(std::filesystem::path filePath) {
     auto scene = std::make_unique<Scene>(this);
     scene->load(filePath);
 
     if (!scene->loaded) {
-        return;
+        return LOAD_FAILED;
     }
+
+    uint32_t modelId = getLoadedModelId();
 
     ModelData modelData = {};
 
@@ -199,10 +202,14 @@ void Renderer::loadGltf(std::filesystem::path filePath) {
         writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
     }
 
-    m_sceneDatas.emplace_back(std::move(scene), modelData);
+    m_sceneDatas.emplace_back(std::move(scene), modelId);
+
+    m_modelDatas.emplace_back(modelData);
 
     destroyStaticBuffers();
     createStaticBuffers();
+
+    return modelId;
 }
 
 void Renderer::createStaticBuffers() {
@@ -283,10 +290,12 @@ void Renderer::setupVulkan() {
     descriptorLayoutBuilder.addBinding(TRANSFORM_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(MATERIAL_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(JOINT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    descriptorLayoutBuilder.addBinding(MODEL_TRANSFORM_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(LIGHT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    std::array<VkDescriptorBindingFlags, 6> flagArray = {
+    std::array<VkDescriptorBindingFlags, 7> flagArray = {
+            0,
             0,
             0,
             0,
@@ -311,7 +320,7 @@ void Renderer::setupVulkan() {
     std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1},
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         4},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         5},
     };
 
     globalDescriptors = DescriptorAllocator();
@@ -389,6 +398,9 @@ void Renderer::terminateVulkan() {
     if (m_lightBuffer.buffer != VK_NULL_HANDLE) {
         vulkanContext.destroyBuffer(m_lightBuffer);
     }
+    if (m_modelTransformBuffer.buffer != VK_NULL_HANDLE) {
+        vulkanContext.destroyBuffer(m_modelTransformBuffer);
+    }
 
     vulkanContext.destroyBuffer(m_uniformBuffer);
     vulkanContext.destroyBuffer(m_transformBuffer);
@@ -406,6 +418,9 @@ void Renderer::terminateVulkan() {
         }
         if (m_boundedLightBuffers[frame_i].buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_boundedLightBuffers[frame_i]);
+        }
+        if (m_boundedModelTransformBuffer[frame_i].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[frame_i]);
         }
     }
 
@@ -467,6 +482,10 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                        m_boundedTransformBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     writer.writeBuffer(JOINT_BINDING, m_boundedJointBuffers[currentFrame].buffer,
                        m_boundedJointBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    if (m_boundedModelTransformBuffer[currentFrame].buffer != VK_NULL_HANDLE) {
+        writer.writeBuffer(MODEL_TRANSFORM_BINDING, m_boundedModelTransformBuffer[currentFrame].buffer,
+                           m_boundedModelTransformBuffer[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    }
     if (m_boundedLightBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
         writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffers[currentFrame].buffer,
                            m_boundedLightBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -490,18 +509,23 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     pcb.vertexBuffer = vulkanContext.getBufferAddress(m_boundedVertexBuffer);
 
     for (const auto &drawData: m_drawDatas) {
+        if (drawData.instanceCount == 0) {
+            continue;
+        }
+
         pcb.transformOffset = drawData.transformOffset;
         pcb.materialOffset = drawData.materialOffset;
         pcb.jointOffset = drawData.jointOffset;
+        pcb.modelTransformOffset = drawData.modelTransformOffset;
 
         vkCmdPushConstants(cmd, trianglePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0,
                            sizeof(PushConstantsBindless),
                            &pcb);
         if (drawData.hasIndices) {
-            vkCmdDrawIndexed(cmd, drawData.indexCount, 1, drawData.indexOffset, 0, 1);
+            vkCmdDrawIndexed(cmd, drawData.indexCount, drawData.instanceCount, drawData.indexOffset, 0, 0);
         } else {
-            vkCmdDraw(cmd, drawData.vertexCount, 1, drawData.vertexOffset, 0);
+            vkCmdDraw(cmd, drawData.vertexCount, drawData.instanceCount, drawData.vertexOffset, 0);
         }
     }
     vkCmdEndRendering(cmd);
@@ -611,15 +635,19 @@ void Renderer::destroyStaticBuffers() {
 }
 
 void Renderer::createDrawDatas(VkCommandBuffer cmd) {
-    m_transforms.clear();
     m_joints = {glm::mat4(1.f)}; // joint index zero is identity matrix
+    m_transforms = {glm::mat4(1.f)}; // transform index zero is identity matrix
     m_drawDatas.clear();
+    m_modelTransforms.clear();
 
     for (auto &scenePair: m_sceneDatas) {
         auto scene = scenePair.first.get();
-        auto &modelData = scenePair.second;
+        auto &modelData = m_modelDatas[scenePair.second];
 
         scene->updateAnimation(m_timer.deltaTime());
+
+        modelData.drawDataCount = 0;
+        modelData.drawDataOffset = m_drawDatas.size();
 
         modelData.jointOffset = m_joints.size();
         size_t numSceneJoints = 0;
@@ -686,6 +714,8 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                         } else {
                             drawData.jointOffset = 0;
                         }
+
+                        modelData.drawDataCount++;
                         m_drawDatas.emplace_back(drawData);
                     }
                     m_transforms.emplace_back(currentNode->worldTransform);
@@ -698,9 +728,13 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
         }
     }
 
-    for (auto &generatedMeshPair : m_generatedMeshDatas) {
-        auto& meshBuffers = generatedMeshPair.first;
-        auto& modelData = generatedMeshPair.second;
+    for (auto &generatedMeshPair: m_generatedMeshDatas) {
+        auto &meshBuffers = generatedMeshPair.first;
+        auto &modelData = m_modelDatas[generatedMeshPair.second];
+
+        modelData.drawDataCount = 1;
+        modelData.drawDataOffset = m_drawDatas.size();
+
         DrawData drawData = {};
 
         drawData.hasIndices = true;
@@ -709,23 +743,57 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
         drawData.indexCount = meshBuffers->indices.size();
         drawData.vertexCount = meshBuffers->vertices.size();
 
-        // todo: use default material and texture for now
+        // todo: using default material and texture for now
         drawData.materialOffset = 0;
         drawData.jointOffset = 0;
 
-        // todo: implement instances and model transformations
-        drawData.transformOffset = m_transforms.size();
-        m_transforms.emplace_back(1.f);
+        drawData.transformOffset = 0; // identity matrix at index 0
 
         m_drawDatas.emplace_back(drawData);
     }
 
+    // create model transform buffer and update DrawData instance count
+    // model transform for instance is at index (modelTransformOffset + gl_InstanceIndex) of modelTransformBuffer
+    std::vector<std::pair<uint32_t, std::vector<glm::mat4>>> modelsDrawn;
+    for (auto &renderObject: m_renderObjects) {
+        uint32_t modelId = renderObject.second.modelId;
+        glm::mat4& modelTransform = renderObject.second.modelMatrix;
+
+        auto it = std::find_if(modelsDrawn.begin(), modelsDrawn.end(),
+                               [modelId](const std::pair<uint32_t, std::vector<glm::mat4>> &element) {
+                                   return element.first == modelId;
+                               });
+
+        if (it != modelsDrawn.end()) {
+            it->second.emplace_back(modelTransform);
+        } else {
+            modelsDrawn.emplace_back(modelId, std::vector<glm::mat4>{modelTransform});
+        }
+    }
+
+    for (auto &model: modelsDrawn) {
+        uint32_t modelId = model.first;
+        uint32_t instanceCount = model.second.size();
+
+        auto &modelData = m_modelDatas[modelId];
+
+        for (size_t dd_i = 0; dd_i < modelData.drawDataCount; dd_i++) {
+            auto &drawData = m_drawDatas[modelData.drawDataOffset + dd_i];
+            drawData.modelTransformOffset = m_modelTransforms.size();
+            drawData.instanceCount = instanceCount;
+        }
+
+        for (auto &modelMatrix: model.second) {
+            m_modelTransforms.emplace_back(modelMatrix);
+        }
+    }
 
     // (re)create buffers if size changes
     uint32_t transformBufferSize = m_transforms.size() * sizeof(glm::mat4);
     uint32_t jointBufferSize = m_joints.size() * sizeof(glm::mat4);
+    uint32_t modelTransformBufferSize = m_modelTransforms.size() * sizeof(glm::mat4);
 
-    if (transformBufferSize != m_transformBuffer.info.size) {
+    if (transformBufferSize != 0 && transformBufferSize != m_transformBuffer.info.size) {
         if (m_transformBuffer.buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_transformBuffer);
         }
@@ -736,7 +804,7 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                                                        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     }
 
-    if (transformBufferSize != m_boundedTransformBuffers[currentFrame].info.size) {
+    if (transformBufferSize != 0 && transformBufferSize != m_boundedTransformBuffers[currentFrame].info.size) {
         if (m_boundedTransformBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_boundedTransformBuffers[currentFrame]);
         }
@@ -746,7 +814,7 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                                                                              VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
-    if (jointBufferSize != m_jointBuffer.info.size) {
+    if (jointBufferSize != 0 && jointBufferSize != m_jointBuffer.info.size) {
         if (m_jointBuffer.buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_jointBuffer);
         }
@@ -757,7 +825,7 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                                                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     }
 
-    if (jointBufferSize != m_boundedJointBuffers[currentFrame].info.size) {
+    if (jointBufferSize != 0 && jointBufferSize != m_boundedJointBuffers[currentFrame].info.size) {
         if (m_boundedJointBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
             vulkanContext.destroyBuffer(m_boundedJointBuffers[currentFrame]);
         }
@@ -767,23 +835,59 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
                                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
-    // update buffers
-    memcpy(m_transformBuffer.info.pMappedData, m_transforms.data(), transformBufferSize);
-    memcpy(m_jointBuffer.info.pMappedData, m_joints.data(), jointBufferSize);
+    if (modelTransformBufferSize != 0 && modelTransformBufferSize != m_modelTransformBuffer.info.size) {
+        if (m_modelTransformBuffer.buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_modelTransformBuffer);
+        }
+        m_modelTransformBuffer = vulkanContext.createBuffer(modelTransformBufferSize,
+                                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                            VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    }
 
-    VkBufferCopy transformCopy = {0};
-    transformCopy.dstOffset = 0;
-    transformCopy.srcOffset = 0;
-    transformCopy.size = transformBufferSize;
-    vkCmdCopyBuffer(cmd, m_transformBuffer.buffer, m_boundedTransformBuffers[currentFrame].buffer,
-                    1, &transformCopy);
+    if (modelTransformBufferSize != 0 &&
+        modelTransformBufferSize != m_boundedModelTransformBuffer[currentFrame].info.size) {
+        if (m_boundedModelTransformBuffer[currentFrame].buffer != VK_NULL_HANDLE) {
+            vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[currentFrame]);
+        }
+        m_boundedModelTransformBuffer[currentFrame] = vulkanContext.createBuffer(modelTransformBufferSize,
+                                                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                                 VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    }
 
-    VkBufferCopy jointCopy = {0};
-    jointCopy.dstOffset = 0;
-    jointCopy.srcOffset = 0;
-    jointCopy.size = jointBufferSize;
-    vkCmdCopyBuffer(cmd, m_jointBuffer.buffer, m_boundedJointBuffers[currentFrame].buffer,
-                    1, &jointCopy);
+    // update buffers contents
+    if (transformBufferSize != 0) {
+        memcpy(m_transformBuffer.info.pMappedData, m_transforms.data(), transformBufferSize);
+        VkBufferCopy transformCopy = {0};
+        transformCopy.dstOffset = 0;
+        transformCopy.srcOffset = 0;
+        transformCopy.size = transformBufferSize;
+        vkCmdCopyBuffer(cmd, m_transformBuffer.buffer, m_boundedTransformBuffers[currentFrame].buffer,
+                        1, &transformCopy);
+    }
+
+    if (jointBufferSize != 0) {
+        memcpy(m_jointBuffer.info.pMappedData, m_joints.data(), jointBufferSize);
+        VkBufferCopy jointCopy = {0};
+        jointCopy.dstOffset = 0;
+        jointCopy.srcOffset = 0;
+        jointCopy.size = jointBufferSize;
+        vkCmdCopyBuffer(cmd, m_jointBuffer.buffer, m_boundedJointBuffers[currentFrame].buffer,
+                        1, &jointCopy);
+    }
+
+    if (modelTransformBufferSize != 0) {
+        memcpy(m_modelTransformBuffer.info.pMappedData, m_modelTransforms.data(), modelTransformBufferSize);
+
+        VkBufferCopy modelTransformCopy = {0};
+        modelTransformCopy.dstOffset = 0;
+        modelTransformCopy.srcOffset = 0;
+        modelTransformCopy.size = modelTransformBufferSize;
+        vkCmdCopyBuffer(cmd, m_modelTransformBuffer.buffer, m_boundedModelTransformBuffer[currentFrame].buffer,
+                        1, &modelTransformCopy);
+    }
 }
 
 void Renderer::addLight(Light light) {
@@ -824,8 +928,6 @@ void Renderer::updateLightBuffer(VkCommandBuffer cmd) {
     lightCopy.size = lightBufferSize;
     vkCmdCopyBuffer(cmd, m_lightBuffer.buffer, m_boundedLightBuffers[currentFrame].buffer,
                     1, &lightCopy);
-
-
 }
 
 void Renderer::updateLightPos(uint32_t lightIndex) {
@@ -844,8 +946,10 @@ void Renderer::updateLightPos(uint32_t lightIndex) {
     m_lights[lightIndex].position.x = newX;
 }
 
-void Renderer::loadGeneratedMesh(MeshBuffers *meshBuffer) {
+uint32_t Renderer::loadGeneratedMesh(MeshBuffers *meshBuffer) {
     ModelData modelData = {};
+
+    uint32_t modelId = getLoadedModelId();
 
     modelData.vertexOffset = m_vertices.size();
     m_vertices.insert(m_vertices.end(), meshBuffer->vertices.begin(), meshBuffer->vertices.end());
@@ -862,8 +966,32 @@ void Renderer::loadGeneratedMesh(MeshBuffers *meshBuffer) {
     modelData.textureOffset = 0;
     modelData.materialOffset = 0;
 
-    m_generatedMeshDatas.emplace_back(meshBuffer, modelData);
+    m_generatedMeshDatas.emplace_back(meshBuffer, modelId);
+
+    m_modelDatas.emplace_back(modelData);
 
     destroyStaticBuffers();
     createStaticBuffers();
+
+    return modelId;
+}
+
+uint32_t Renderer::getLoadedModelId() {
+    return m_loadedModelCount++;
+}
+
+uint32_t Renderer::getRenderObjectId() {
+    return m_renderObjectCount++;
+}
+
+uint32_t Renderer::addRenderObject(RenderObjectInfo info) {
+    if (info.modelId > m_loadedModelCount - 1) {
+        std::cout << "invalid modelId" << std::endl;
+        return LOAD_FAILED;
+    }
+
+    uint32_t renderObjId = getRenderObjectId();
+    m_renderObjects.emplace_back(renderObjId, info);
+
+    return renderObjId;
 }

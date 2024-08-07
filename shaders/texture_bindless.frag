@@ -22,11 +22,11 @@ layout(set = 0, binding = 0) uniform GlobalUniform {
     float pad[12];
 } globalUniform;
 
-layout(set = 0, binding = 4) readonly buffer lightBuffer {
+layout(set = 0, binding = 5) readonly buffer lightBuffer {
     Light lights[];
 };
 
-layout(set = 0, binding = 5) uniform sampler2D displayTexture[];
+layout(set = 0, binding = 6) uniform sampler2D displayTexture[];
 
 struct Vertex {
     vec3 position;

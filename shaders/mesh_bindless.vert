@@ -22,6 +22,10 @@ layout(std430, set = 0, binding = 3) readonly buffer JointBuffer {
     mat4 joints[];
 };
 
+layout(std430, set = 0, binding = 4) readonly buffer ModelTransformBuffer {
+    mat4 modelTransforms[];
+};
+
 struct Vertex {
     vec3 position;
     float uv_x;
@@ -44,6 +48,9 @@ layout(push_constant) uniform constants
     uint transformOffset;
     uint materialOffset;
     uint jointOffset;
+
+    uint modelTransformOffset;
+    float pad[3];
 } pc;
 
 void main()
@@ -52,13 +59,15 @@ void main()
     Vertex v = pc.vertexBuffer.vertices[gl_VertexIndex];
     mat4 transform = transforms[pc.transformOffset];
 
+    mat4 modelTransform = modelTransforms[pc.modelTransformOffset + gl_InstanceIndex];
+
     mat4 skinMatrix =
     v.jointWeights.x * joints[pc.jointOffset + int(v.jointIndices.x)] +
     v.jointWeights.y * joints[pc.jointOffset + int(v.jointIndices.y)] +
     v.jointWeights.z * joints[pc.jointOffset + int(v.jointIndices.z)] +
     v.jointWeights.w * joints[pc.jointOffset + int(v.jointIndices.w)];
 
-    mat4 model = transform * skinMatrix;
+    mat4 model = modelTransform * transform * skinMatrix;
 
     outFragPos = vec3(model * vec4(v.position, 1.0));
 

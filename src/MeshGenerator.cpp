@@ -179,7 +179,6 @@ MeshBuffers createSphereMesh(float radius, uint32_t meridians, uint32_t parallel
             uint32_t first = p_i * (meridians + 1) + m_i;
             uint32_t second = first + meridians + 1;
 
-            // Two triangles per quad
             meshBuffers.indices.push_back(first);
             meshBuffers.indices.push_back(second);
             meshBuffers.indices.push_back(first + 1);
