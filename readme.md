@@ -3,6 +3,9 @@
 ## About
 A Vulkan renderer. It's primarily a playground for me to learn and try to implement modern graphics programming techniques. 
 
+### Screenshots
+![screenshot](screenshots/cesium_man.gif)
+
 ## Features
 - [x] Bindless resources
 - [x] glTF scene loading
