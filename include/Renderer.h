@@ -160,6 +160,8 @@ private:
 
     void updateLightPos(uint32_t lightIndex);
 
+    void updateRenderObjects();
+
     VulkanImage opaqueWhiteTextureImage = {};
     VulkanImage opaqueCyanTextureImage = {};
     VulkanImage defaultNormalTextureImage = {};

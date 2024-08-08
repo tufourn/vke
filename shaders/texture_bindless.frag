@@ -169,7 +169,7 @@ void main()
         vec3 Fr = (D * V) * F;
         vec3 Fd = diffuseColor;// * Fd_Lambert()
 
-        outColor += (Fd + Fr) * NoL;
+        outColor += (Fd + Fr) * NoL / globalUniform.numLights;
     }
 
     outColor += emissive;

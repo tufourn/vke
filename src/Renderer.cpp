@@ -439,6 +439,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     }
 
     updateLightPos(0);
+    updateRenderObjects();
     updateLightBuffer(cmd);
 
     createDrawDatas(cmd);
@@ -973,4 +974,10 @@ uint32_t Renderer::addRenderObject(RenderObjectInfo info) {
     m_renderObjects.emplace_back(renderObjId, info);
 
     return renderObjId;
+}
+
+void Renderer::updateRenderObjects() {
+    for (auto& renderObject : m_renderObjects) {
+        renderObject.second.modelMatrix = glm::rotate(renderObject.second.modelMatrix, 0.2f * m_timer.deltaTime(), glm::vec3(0.0, 1.0, 0.0));
+    }
 }
