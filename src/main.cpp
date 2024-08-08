@@ -1,5 +1,7 @@
 #include <Renderer.h>
 
+// main looks like a mess right now because it mostly contains code for testing the renderer
+
 int main() {
     Renderer renderer;
 
@@ -18,18 +20,21 @@ int main() {
 //    MeshBuffers sphereMesh = createSphereMesh(1.0, 20, 20);
 //    renderer.loadGeneratedMesh(&sphereMesh);
 
-//    renderer.loadGltf("assets/models/milk_truck/CesiumMilkTruck.gltf");
-//    renderer.loadGltf("assets/models/box/BoxTextured.gltf");
-//    renderer.loadGltf("assets/models/brainstem/BrainStem.gltf");
-//    renderer.loadGltf("assets/models/box/AnimatedMorphCube.gltf");
-//    renderer.loadGltf("assets/models/tests/SimpleSkin.gltf");
-//    renderer.loadGltf("assets/models/tests/RecursiveSkeletons.gltf");
-//    renderer.loadGltf("assets/models/box/BoxAnimated.gltf");
-//    renderer.loadGltf("assets/models/tests/OrientationTest.gltf");
-//    renderer.loadGltf("assets/models/Sponza/glTF/Sponza.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/milk_truck/CesiumMilkTruck.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/box/BoxTextured.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/tests/InterpolationTest.glb");
+//    uint32_t id = renderer.loadGltf("assets/models/box/AnimatedMorphCube.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/tests/SimpleSkin.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/tests/RecursiveSkeletons.gltf");
+    uint32_t id = renderer.loadGltf("assets/models/box/BoxAnimated.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/tests/OrientationTest.gltf");
+//    uint32_t id = renderer.loadGltf("assets/models/Sponza/glTF/Sponza.gltf");
+
 //    renderer.loadGltf("assets/models/triangle/Triangle.gltf");
     uint32_t cesiumManId = renderer.loadGltf("assets/models/cesium_man/CesiumMan.gltf");
     uint32_t helmetId = renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
+
+    renderer.addRenderObject({glm::mat4(1.f), cubeId});
 
     for (int x = 0; x < 10; ++x) {
         for (int z = 0; z < 10; ++z) {

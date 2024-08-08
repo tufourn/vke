@@ -6,22 +6,20 @@
 #include <optional>
 
 #include "Utils.h"
-#include "VulkanContext.h"
 #include "VulkanTypes.h"
 
-class Renderer;
+class VulkanContext;
 
-struct Scene {
+struct GltfScene {
 public:
-    MOVABLE_ONLY(Scene);
+    MOVABLE_ONLY(GltfScene);
 
-    Scene(Renderer *renderer);
+    GltfScene(VulkanContext *vulkanContext);
 
-    ~Scene();
+    ~GltfScene();
 
     std::filesystem::path path;
 
-    Renderer *renderer;
     bool loaded = false;
 
     std::vector<std::optional<VulkanImage> > images;
@@ -34,8 +32,8 @@ public:
     std::vector<std::shared_ptr<Node> > nodes;
     std::vector<std::shared_ptr<Node> > topLevelNodes;
 
-    std::vector<uint32_t> indexBuffer;
-    std::vector<Vertex> vertexBuffer;
+    std::vector<uint32_t> indices;
+    std::vector<Vertex> vertices;
 
     std::vector<Animation> animations;
     std::vector<std::unique_ptr<Skin>> skins;
@@ -43,13 +41,13 @@ public:
     std::vector<uint32_t> skinJointCounts;
     std::vector<uint32_t> jointOffsets;
 
-    void clear();
-
     void load(std::filesystem::path filePath);
 
     void updateAnimation(float deltaTime);
 
 private:
+    VulkanContext* m_vulkanContext;
+
     void parseImages(const cgltf_data *data);
 
     void parseMesh(const cgltf_data *data);
@@ -63,6 +61,9 @@ private:
     void parseAnimations(const cgltf_data *data);
 
     void parseSkins(const cgltf_data *data);
+
+    void clear();
+
 };
 
 static VkFilter extractGltfMagFilter(int gltfMagFilter);

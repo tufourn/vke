@@ -1,5 +1,5 @@
 #include "GltfLoader.h"
-#include "Renderer.h"
+#include "VulkanContext.h"
 
 #define CGLTF_IMPLEMENTATION
 #define GLM_ENABLE_EXPERIMENTAL
@@ -15,8 +15,24 @@
 #include <numeric>
 
 #include "CalcTangents.h"
+#include "VulkanUtils.h"
 
-void Scene::parseTextures(const cgltf_data *data) {
+void GltfScene::parseTextures(const cgltf_data *data) {
+    // if no sampler, create a default one
+    if (data->samplers_count == 0) {
+        VkSamplerCreateInfo samplerInfo = {};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.minFilter = VK_FILTER_NEAREST;
+        samplerInfo.magFilter = VK_FILTER_NEAREST;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.maxLod = 16.f;
+
+        VkSampler sampler;
+        vkCreateSampler(m_vulkanContext->device, &samplerInfo, nullptr, &sampler);
+
+        samplers.emplace_back(sampler);
+    }
+
     for (auto sampler_i = 0; sampler_i < data->samplers_count; sampler_i++) {
         const cgltf_sampler *gltfSampler = &data->samplers[sampler_i];
         VkSamplerCreateInfo samplerInfo = {};
@@ -29,7 +45,7 @@ void Scene::parseTextures(const cgltf_data *data) {
         samplerInfo.maxLod = 16;
 
         VkSampler sampler;
-        vkCreateSampler(renderer->vulkanContext.device, &samplerInfo, nullptr, &sampler);
+        vkCreateSampler(m_vulkanContext->device, &samplerInfo, nullptr, &sampler);
 
         samplers.emplace_back(sampler);
     }
@@ -44,23 +60,20 @@ void Scene::parseTextures(const cgltf_data *data) {
         size_t imageIndex = gltfTexture->image - data->images;
         if (!images.empty() && images[imageIndex].has_value()) {
             texture.imageview = images[imageIndex].value().imageView;
-        } else {
-            // if image can't be loaded, use the error checkerboard texture
-            texture.imageview = renderer->errorTextureImage.imageView;
         }
 
         if (gltfTexture->sampler && data->samplers) {
             size_t samplerIndex = gltfTexture->sampler - data->samplers;
             texture.sampler = samplers[samplerIndex];
         } else {
-            texture.sampler = renderer->defaultSampler;
+            texture.sampler = samplers[0]; // use default sampler
         }
 
         textures.emplace_back(std::make_shared<Texture>(texture));
     }
 }
 
-void Scene::parseMaterials(const cgltf_data *data) {
+void GltfScene::parseMaterials(const cgltf_data *data) {
     for (size_t material_i = 0; material_i < data->materials_count; material_i++) {
         const cgltf_material *gltfMaterial = &data->materials[material_i];
         Material material = {};
@@ -177,23 +190,23 @@ VkSamplerMipmapMode extractGltfMipmapMode(int gltfMinFilter) {
     }
 }
 
-Scene::Scene(Renderer *renderer) : renderer(renderer) {
+GltfScene::GltfScene(VulkanContext *vulkanContext) : m_vulkanContext(vulkanContext) {
 }
 
 
-void Scene::clear() {
+void GltfScene::clear() {
     for (auto &image: images) {
         if (image.has_value()) {
-            renderer->vulkanContext.destroyImage(image.value());
+            m_vulkanContext->destroyImage(image.value());
         }
     }
 
     for (auto &sampler: samplers) {
-        vkDestroySampler(renderer->vulkanContext.device, sampler, nullptr);
+        vkDestroySampler(m_vulkanContext->device, sampler, nullptr);
     }
 }
 
-void Scene::load(std::filesystem::path filePath) {
+void GltfScene::load(std::filesystem::path filePath) {
     path = std::filesystem::current_path() / filePath;
 
     cgltf_options options = {};
@@ -224,8 +237,7 @@ void Scene::load(std::filesystem::path filePath) {
     loaded = true;
 }
 
-// todo: right now it's easiest to have scenes manage their own allocated images, but it might be a better idea to move this stuff inside the renderer class
-void Scene::parseImages(const cgltf_data *data) {
+void GltfScene::parseImages(const cgltf_data *data) {
     std::filesystem::path directory = path.parent_path();
 
     for (size_t image_i = 0; image_i < data->images_count; image_i++) {
@@ -266,7 +278,7 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.height = height;
                     imageExtent.depth = 1;
 
-                    newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                    newImage = m_vulkanContext->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
                                                                    true);
 
@@ -275,9 +287,14 @@ void Scene::parseImages(const cgltf_data *data) {
                     stbi_image_free(stbData);
                     free(imageData);
                 } else {
-                    std::cerr << "Invalid embedded image uri" << std::endl;
-                    //todo: use default missing texture
-                    return;
+                    std::cerr << "Invalid embedded image uri, using error texture" << std::endl;
+
+                    newImage = m_vulkanContext->createImage(VkUtil::createCheckerboard().data(),
+                                                                   VkExtent3D(8, 8, 1),
+                                                                   VK_FORMAT_R8G8B8A8_UNORM,
+                                                                   VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+                    images.emplace_back(newImage);
                 }
             } else {
                 // todo: load image from file and from buffer
@@ -289,7 +306,7 @@ void Scene::parseImages(const cgltf_data *data) {
                     imageExtent.height = height;
                     imageExtent.depth = 1;
 
-                    newImage = renderer->vulkanContext.createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
+                    newImage = m_vulkanContext->createImage(stbData, imageExtent, VK_FORMAT_R8G8B8A8_UNORM,
                                                                    VK_IMAGE_USAGE_SAMPLED_BIT,
                                                                    true);
 
@@ -297,17 +314,30 @@ void Scene::parseImages(const cgltf_data *data) {
 
                     stbi_image_free(stbData);
                 } else {
-                    std::cerr << "Failed to read image file " << imageFile << std::endl;
-                    images.emplace_back();
+                    std::cerr << "Failed to read image file " << imageFile << ", using error texture" << std::endl;
+
+                    newImage = m_vulkanContext->createImage(VkUtil::createCheckerboard().data(),
+                                                            VkExtent3D(8, 8, 1),
+                                                            VK_FORMAT_R8G8B8A8_UNORM,
+                                                            VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+                    images.emplace_back(newImage);
                 }
             }
         } else {
             //todo: read image from buffer
+            std::cout << "Image read from buffer not yet implemented, using error texture" << std::endl;
+            newImage = m_vulkanContext->createImage(VkUtil::createCheckerboard().data(),
+                                                    VkExtent3D(8, 8, 1),
+                                                    VK_FORMAT_R8G8B8A8_UNORM,
+                                                    VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+            images.emplace_back(newImage);
         }
     }
 }
 
-void Scene::parseMesh(const cgltf_data *data) {
+void GltfScene::parseMesh(const cgltf_data *data) {
     for (size_t mesh_i = 0; mesh_i < data->meshes_count; mesh_i++) {
         Mesh newMesh = {};
 
@@ -321,8 +351,8 @@ void Scene::parseMesh(const cgltf_data *data) {
             const cgltf_primitive *gltfPrimitive = &gltfMesh->primitives[primitive_i];
             MeshPrimitive newPrimitive = {};
 
-            uint32_t indexStart = static_cast<uint32_t>(indexBuffer.size());
-            uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
+            uint32_t indexStart = static_cast<uint32_t>(indices.size());
+            uint32_t vertexStart = static_cast<uint32_t>(vertices.size());
             newPrimitive.indexStart = indexStart;
             newPrimitive.vertexStart = vertexStart;
 
@@ -507,7 +537,7 @@ void Scene::parseMesh(const cgltf_data *data) {
                     vertex.jointWeights = glm::vec4(1.f, 0.f, 0.f, 0.f); // weight 1.f identity matrix
                 }
 
-                vertexBuffer.push_back(vertex);
+                vertices.push_back(vertex);
             }
 
             if (hasIndices) {
@@ -524,21 +554,21 @@ void Scene::parseMesh(const cgltf_data *data) {
                     case 4: {
                         const uint32_t *buffer = reinterpret_cast<const uint32_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            indexBuffer.push_back(buffer[i] + vertexStart);
+                            indices.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
                     case 2: {
                         const uint16_t *buffer = reinterpret_cast<const uint16_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            indexBuffer.push_back(buffer[i] + vertexStart);
+                            indices.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
                     case 1: {
                         const uint8_t *buffer = reinterpret_cast<const uint8_t *>(&indBuffer[bufOffset]);
                         for (size_t i = 0; i < indexCount; i++) {
-                            indexBuffer.push_back(buffer[i] + vertexStart);
+                            indices.push_back(buffer[i] + vertexStart);
                         }
                         break;
                     }
@@ -559,16 +589,16 @@ void Scene::parseMesh(const cgltf_data *data) {
 
             if (!tangentAccessor && uvAccessor && normalAccessor) {
                 CalcTangents mikktspace;
-                CalcTangentData tangentData = {indexBuffer, vertexBuffer, newPrimitive};
+                CalcTangentData tangentData = {indices, vertices, newPrimitive};
                 mikktspace.calculate(&tangentData);
 
-                for (size_t vertex_i = newPrimitive.vertexStart; vertex_i < vertexBuffer.size(); vertex_i++) {
-                    vertexBuffer[vertex_i].bitangent =
-                            glm::vec4(glm::cross(vertexBuffer[vertex_i].normal,
-                                                 glm::vec3(vertexBuffer[vertex_i].tangent.x,
-                                                           vertexBuffer[vertex_i].tangent.y,
-                                                           vertexBuffer[vertex_i].tangent.z)),
-                                      vertexBuffer[vertex_i].tangent.w);
+                for (size_t vertex_i = newPrimitive.vertexStart; vertex_i < vertices.size(); vertex_i++) {
+                    vertices[vertex_i].bitangent =
+                            glm::vec4(glm::cross(vertices[vertex_i].normal,
+                                                 glm::vec3(vertices[vertex_i].tangent.x,
+                                                           vertices[vertex_i].tangent.y,
+                                                           vertices[vertex_i].tangent.z)),
+                                      vertices[vertex_i].tangent.w);
                 }
             }
 
@@ -578,7 +608,7 @@ void Scene::parseMesh(const cgltf_data *data) {
     }
 }
 
-void Scene::parseNodes(const cgltf_data *data) {
+void GltfScene::parseNodes(const cgltf_data *data) {
     for (size_t node_i = 0; node_i < data->nodes_count; node_i++) {
         cgltf_node gltfNode = data->nodes[node_i];
         std::shared_ptr<Node> newNode = std::make_shared<Node>();
@@ -636,7 +666,7 @@ void Scene::parseNodes(const cgltf_data *data) {
     }
 }
 
-void Scene::parseAnimations(const cgltf_data *data) {
+void GltfScene::parseAnimations(const cgltf_data *data) {
     for (size_t animation_i = 0; animation_i < data->animations_count; animation_i++) {
         const cgltf_animation *gltfAnimation = &data->animations[animation_i];
         Animation animation = {};
@@ -745,11 +775,11 @@ void Scene::parseAnimations(const cgltf_data *data) {
     }
 }
 
-Scene::~Scene() {
+GltfScene::~GltfScene() {
     clear();
 }
 
-void Scene::updateAnimation(float deltaTime) {
+void GltfScene::updateAnimation(float deltaTime) {
     for (auto &animation: animations) {
         animation.currentTime += deltaTime;
         while (animation.currentTime > animation.end) {
@@ -897,7 +927,7 @@ void Scene::updateAnimation(float deltaTime) {
     }
 }
 
-void Scene::parseSkins(const cgltf_data *data) {
+void GltfScene::parseSkins(const cgltf_data *data) {
     for (size_t skin_i = 0; skin_i < data->skins_count; skin_i++) {
         const cgltf_skin *gltfSkin = &data->skins[skin_i];
         auto skin = std::make_unique<Skin>();

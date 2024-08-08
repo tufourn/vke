@@ -80,15 +80,9 @@ public:
 
     void addLight(Light light);
 
-    VulkanContext vulkanContext;
-
-    VulkanImage errorTextureImage = {};
-    VulkanImage opaqueWhiteTextureImage = {};
-    VulkanImage opaqueCyanTextureImage = {};
-    VulkanImage defaultNormalTextureImage = {};
-    VkSampler defaultSampler = {};
-
 private:
+    VulkanContext m_vulkanContext;
+
     uint32_t currentFrame = 0;
 
     uint32_t getLoadedModelId();
@@ -99,7 +93,7 @@ private:
 
     std::vector<std::pair<uint32_t, RenderObjectInfo>> m_renderObjects;
 
-    std::vector<std::pair<std::unique_ptr<Scene>, uint32_t>> m_sceneDatas;
+    std::vector<std::pair<std::unique_ptr<GltfScene>, uint32_t>> m_sceneDatas;
     std::vector<std::pair<MeshBuffers *, uint32_t>> m_generatedMeshDatas;
 
     std::vector<ModelData> m_modelDatas;
@@ -165,4 +159,9 @@ private:
     void updateLightBuffer(VkCommandBuffer cmd);
 
     void updateLightPos(uint32_t lightIndex);
+
+    VulkanImage opaqueWhiteTextureImage = {};
+    VulkanImage opaqueCyanTextureImage = {};
+    VulkanImage defaultNormalTextureImage = {};
+    VkSampler defaultSampler = {};
 };

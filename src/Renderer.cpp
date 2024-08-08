@@ -29,7 +29,7 @@ Renderer::~Renderer() {
 void Renderer::run() {
     m_timer.reset();
 
-    while (!glfwWindowShouldClose(vulkanContext.window)) {
+    while (!glfwWindowShouldClose(m_vulkanContext.window)) {
         glfwPollEvents();
 
         m_timer.tick();
@@ -37,20 +37,20 @@ void Renderer::run() {
 
         m_camera.update();
 
-        vkWaitForFences(vulkanContext.device, 1, &vulkanContext.frames[currentFrame].renderFence, VK_TRUE, 1e9);
-        VK_CHECK(vkResetFences(vulkanContext.device, 1, &vulkanContext.frames[currentFrame].renderFence))
+        vkWaitForFences(m_vulkanContext.device, 1, &m_vulkanContext.frames[currentFrame].renderFence, VK_TRUE, 1e9);
+        VK_CHECK(vkResetFences(m_vulkanContext.device, 1, &m_vulkanContext.frames[currentFrame].renderFence))
 
         uint32_t imageIndex;
-        VkResult swapchainRet = vkAcquireNextImageKHR(vulkanContext.device, vulkanContext.swapchain, 1e9,
-                                                      vulkanContext.frames[currentFrame].imageAvailableSemaphore,
+        VkResult swapchainRet = vkAcquireNextImageKHR(m_vulkanContext.device, m_vulkanContext.swapchain, 1e9,
+                                                      m_vulkanContext.frames[currentFrame].imageAvailableSemaphore,
                                                       VK_NULL_HANDLE,
                                                       &imageIndex);
         if (swapchainRet == VK_ERROR_OUT_OF_DATE_KHR) {
-            vulkanContext.resizeWindow();
+            m_vulkanContext.resizeWindow();
             continue;
         }
 
-        VkCommandBuffer cmd = vulkanContext.frames[currentFrame].commandBuffer;
+        VkCommandBuffer cmd = m_vulkanContext.frames[currentFrame].commandBuffer;
 
         VK_CHECK(vkResetCommandBuffer(cmd, 0))
 
@@ -59,7 +59,7 @@ void Renderer::run() {
 
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo))
 
-        VkUtil::transitionImage(cmd, vulkanContext.drawImage.image,
+        VkUtil::transitionImage(cmd, m_vulkanContext.drawImage.image,
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -68,30 +68,31 @@ void Renderer::run() {
 
         VkImageSubresourceRange clearRange = VkInit::imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
-        vkCmdClearColorImage(cmd, vulkanContext.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+        vkCmdClearColorImage(cmd, m_vulkanContext.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1,
+                             &clearRange);
 
-        VkUtil::transitionImage(cmd, vulkanContext.drawImage.image,
+        VkUtil::transitionImage(cmd, m_vulkanContext.drawImage.image,
                                 VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
         drawGeometry(cmd);
 
-        VkUtil::transitionImage(cmd, vulkanContext.drawImage.image,
+        VkUtil::transitionImage(cmd, m_vulkanContext.drawImage.image,
                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
 
-        VkUtil::transitionImage(cmd, vulkanContext.swapchainImages[imageIndex],
+        VkUtil::transitionImage(cmd, m_vulkanContext.swapchainImages[imageIndex],
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
 
-        VkUtil::copyImageToImage(cmd, vulkanContext.drawImage.image, vulkanContext.swapchainImages[imageIndex],
-                                 vulkanContext.windowExtent,
-                                 vulkanContext.windowExtent);
+        VkUtil::copyImageToImage(cmd, m_vulkanContext.drawImage.image, m_vulkanContext.swapchainImages[imageIndex],
+                                 m_vulkanContext.windowExtent,
+                                 m_vulkanContext.windowExtent);
 
-        VkUtil::transitionImage(cmd, vulkanContext.swapchainImages[imageIndex],
+        VkUtil::transitionImage(cmd, m_vulkanContext.swapchainImages[imageIndex],
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
                                 VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
@@ -101,29 +102,30 @@ void Renderer::run() {
         VkCommandBufferSubmitInfo cmdSubmitInfo = VkInit::commandBufferSubmitInfo(cmd);
 
         VkSemaphoreSubmitInfo waitInfo = VkInit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                                     vulkanContext.frames[currentFrame].imageAvailableSemaphore);
+                                                                     m_vulkanContext.frames[currentFrame].imageAvailableSemaphore);
         VkSemaphoreSubmitInfo signalInfo = VkInit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                                                                       vulkanContext.frames[currentFrame].renderSemaphore);
+                                                                       m_vulkanContext.frames[currentFrame].renderSemaphore);
 
         VkSubmitInfo2 submit = VkInit::submitInfo(&cmdSubmitInfo, &signalInfo, &waitInfo);
 
         VK_CHECK(
-                vkQueueSubmit2(vulkanContext.graphicsQueue, 1, &submit, vulkanContext.frames[currentFrame].renderFence))
+                vkQueueSubmit2(m_vulkanContext.graphicsQueue, 1, &submit,
+                               m_vulkanContext.frames[currentFrame].renderFence))
 
         VkPresentInfoKHR presentInfo = {};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.pNext = nullptr;
-        presentInfo.pSwapchains = &vulkanContext.swapchain.swapchain;
+        presentInfo.pSwapchains = &m_vulkanContext.swapchain.swapchain;
         presentInfo.swapchainCount = 1;
 
-        presentInfo.pWaitSemaphores = &vulkanContext.frames[currentFrame].renderSemaphore;
+        presentInfo.pWaitSemaphores = &m_vulkanContext.frames[currentFrame].renderSemaphore;
         presentInfo.waitSemaphoreCount = 1;
 
         presentInfo.pImageIndices = &imageIndex;
 
-        VkResult presentRet = vkQueuePresentKHR(vulkanContext.presentQueue, &presentInfo);
+        VkResult presentRet = vkQueuePresentKHR(m_vulkanContext.presentQueue, &presentInfo);
         if (presentRet == VK_ERROR_OUT_OF_DATE_KHR) {
-            vulkanContext.resizeWindow();
+            m_vulkanContext.resizeWindow();
         }
 
         currentFrame = (currentFrame + 1) % MAX_CONCURRENT_FRAMES;
@@ -131,7 +133,7 @@ void Renderer::run() {
 }
 
 uint32_t Renderer::loadGltf(std::filesystem::path filePath) {
-    auto scene = std::make_unique<Scene>(this);
+    auto scene = std::make_unique<GltfScene>(&m_vulkanContext);
     scene->load(filePath);
 
     if (!scene->loaded) {
@@ -143,10 +145,10 @@ uint32_t Renderer::loadGltf(std::filesystem::path filePath) {
     ModelData modelData = {};
 
     modelData.vertexOffset = m_vertices.size();
-    m_vertices.insert(m_vertices.end(), scene->vertexBuffer.begin(), scene->vertexBuffer.end());
+    m_vertices.insert(m_vertices.end(), scene->vertices.begin(), scene->vertices.end());
 
     modelData.indexOffset = m_indices.size();
-    m_indices.insert(m_indices.end(), scene->indexBuffer.begin(), scene->indexBuffer.end());
+    m_indices.insert(m_indices.end(), scene->indices.begin(), scene->indices.end());
 
     // make sure index points to the right vertex
     for (size_t index_i = modelData.indexOffset; index_i < m_indices.size(); index_i++) {
@@ -199,7 +201,7 @@ uint32_t Renderer::loadGltf(std::filesystem::path filePath) {
                           texture_i);
     }
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
+        writer.updateSet(m_vulkanContext.device, bindlessDescriptorSets[frame_i]);
     }
 
     m_sceneDatas.emplace_back(std::move(scene), modelId);
@@ -219,36 +221,36 @@ void Renderer::createStaticBuffers() {
 
     const size_t stagingBufferSize = vertexBufferSize + indexBufferSize + materialBufferSize;
 
-    VulkanBuffer stagingBuffer = vulkanContext.createBuffer(stagingBufferSize,
-                                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                            VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    VulkanBuffer stagingBuffer = m_vulkanContext.createBuffer(stagingBufferSize,
+                                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                              VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     void *data = stagingBuffer.info.pMappedData;
 
-    m_boundedVertexBuffer = vulkanContext.createBuffer(vertexBufferSize,
-                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                       VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    memcpy(data, m_vertices.data(), vertexBufferSize);
-
-    if (indexBufferSize != 0) {
-        m_boundedIndexBuffer = vulkanContext.createBuffer(indexBufferSize,
-                                                          VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, m_indices.data(), indexBufferSize);
-    }
-
-    m_boundedMaterialBuffer = vulkanContext.createBuffer(materialBufferSize,
+    m_boundedVertexBuffer = m_vulkanContext.createBuffer(vertexBufferSize,
                                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    memcpy(data, m_vertices.data(), vertexBufferSize);
+
+    if (indexBufferSize != 0) {
+        m_boundedIndexBuffer = m_vulkanContext.createBuffer(indexBufferSize,
+                                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                            VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        memcpy(static_cast<uint8_t *>(data) + vertexBufferSize, m_indices.data(), indexBufferSize);
+    }
+
+    m_boundedMaterialBuffer = m_vulkanContext.createBuffer(materialBufferSize,
+                                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                           VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     memcpy(static_cast<uint8_t *>(data) + vertexBufferSize + indexBufferSize, m_materials.data(),
            materialBufferSize);
 
-    vulkanContext.immediateSubmit([&](VkCommandBuffer cmd) {
+    m_vulkanContext.immediateSubmit([&](VkCommandBuffer cmd) {
         VkBufferCopy vertexCopy = {0};
         vertexCopy.dstOffset = 0;
         vertexCopy.srcOffset = 0;
@@ -273,17 +275,17 @@ void Renderer::createStaticBuffers() {
                         1, &materialCopy);
     });
 
-    vulkanContext.destroyBuffer(stagingBuffer);
+    m_vulkanContext.destroyBuffer(stagingBuffer);
 }
 
 void Renderer::setupVulkan() {
-    vulkanContext.windowExtent = {1920, 1080};
-    vulkanContext.init();
+    m_vulkanContext.windowExtent = {1920, 1080};
+    m_vulkanContext.init();
 
-    glfwSetWindowUserPointer(vulkanContext.window, &m_camera);
-    glfwSetCursorPosCallback(vulkanContext.window, Camera::mouseCallback);
-    glfwSetKeyCallback(vulkanContext.window, Camera::keyCallback);
-    glfwSetMouseButtonCallback(vulkanContext.window, Camera::mouseButtonCallback);
+    glfwSetWindowUserPointer(m_vulkanContext.window, &m_camera);
+    glfwSetCursorPosCallback(m_vulkanContext.window, Camera::mouseCallback);
+    glfwSetKeyCallback(m_vulkanContext.window, Camera::keyCallback);
+    glfwSetMouseButtonCallback(m_vulkanContext.window, Camera::mouseButtonCallback);
 
     DescriptorLayoutBuilder descriptorLayoutBuilder;
     descriptorLayoutBuilder.addBinding(UNIFORM_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -312,7 +314,7 @@ void Renderer::setupVulkan() {
     bindFlags.pBindingFlags = flagArray.data();
     descriptorLayoutBuilder.bindings[TEXTURE_BINDING].descriptorCount = MAX_TEXTURES;
 
-    globalDescriptorLayout = descriptorLayoutBuilder.build(vulkanContext.device,
+    globalDescriptorLayout = descriptorLayoutBuilder.build(m_vulkanContext.device,
                                                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                                            &bindFlags,
                                                            VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
@@ -324,9 +326,9 @@ void Renderer::setupVulkan() {
     };
 
     globalDescriptors = DescriptorAllocator();
-    globalDescriptors.init(vulkanContext.device, 1024, frameSizes, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
+    globalDescriptors.init(m_vulkanContext.device, 1024, frameSizes, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        bindlessDescriptorSets[frame_i] = globalDescriptors.allocate(vulkanContext.device, globalDescriptorLayout);
+        bindlessDescriptorSets[frame_i] = globalDescriptors.allocate(m_vulkanContext.device, globalDescriptorLayout);
     }
 
     VkPushConstantRange pushConstantsRange = {};
@@ -340,11 +342,11 @@ void Renderer::setupVulkan() {
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantsRange;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
 
-    VK_CHECK(vkCreatePipelineLayout(vulkanContext.device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout))
+    VK_CHECK(vkCreatePipelineLayout(m_vulkanContext.device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout))
 
     VkShaderModule triangleVertShader, triangleFragShader;
-    VK_CHECK(vulkanContext.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
-    VK_CHECK(vulkanContext.createShaderModule("shaders/texture_bindless.frag.spv", &triangleFragShader))
+    VK_CHECK(m_vulkanContext.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
+    VK_CHECK(m_vulkanContext.createShaderModule("shaders/texture_bindless.frag.spv", &triangleFragShader))
 
     PipelineBuilder trianglePipelineBuilder;
     trianglePipelineBuilder
@@ -356,80 +358,79 @@ void Renderer::setupVulkan() {
             .setMultisamplingNone()
             .disableBlending()
             .enableDepthTest(VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL)
-            .setColorAttachmentFormat(vulkanContext.drawImage.imageFormat)
-            .setDepthAttachmentFormat(vulkanContext.depthImage.imageFormat);
+            .setColorAttachmentFormat(m_vulkanContext.drawImage.imageFormat)
+            .setDepthAttachmentFormat(m_vulkanContext.depthImage.imageFormat);
 
-    trianglePipeline = trianglePipelineBuilder.build(vulkanContext.device);
+    trianglePipeline = trianglePipelineBuilder.build(m_vulkanContext.device);
 
-    vkDestroyShaderModule(vulkanContext.device, triangleVertShader, nullptr);
-    vkDestroyShaderModule(vulkanContext.device, triangleFragShader, nullptr);
+    vkDestroyShaderModule(m_vulkanContext.device, triangleVertShader, nullptr);
+    vkDestroyShaderModule(m_vulkanContext.device, triangleFragShader, nullptr);
 
-    m_uniformBuffer = vulkanContext.createBuffer(sizeof(GlobalUniformData),
-                                                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                 VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    m_uniformBuffer = m_vulkanContext.createBuffer(sizeof(GlobalUniformData),
+                                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                   VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                   VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
 
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        m_boundedUniformBuffers[frame_i] = vulkanContext.createBuffer(sizeof(GlobalUniformData),
-                                                                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                      VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        m_boundedUniformBuffers[frame_i] = m_vulkanContext.createBuffer(sizeof(GlobalUniformData),
+                                                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
     initDefaultData();
 }
 
 void Renderer::terminateVulkan() {
-    vkDeviceWaitIdle(vulkanContext.device);
+    vkDeviceWaitIdle(m_vulkanContext.device);
 
     // todo: move memory allocation stuff in scene to renderer
     m_sceneDatas.clear();
 
-    vulkanContext.destroyImage(errorTextureImage);
-    vulkanContext.destroyImage(opaqueWhiteTextureImage);
-    vulkanContext.destroyImage(opaqueCyanTextureImage);
-    vulkanContext.destroyImage(defaultNormalTextureImage);
-    vkDestroySampler(vulkanContext.device, defaultSampler, nullptr);
+    m_vulkanContext.destroyImage(opaqueWhiteTextureImage);
+    m_vulkanContext.destroyImage(opaqueCyanTextureImage);
+    m_vulkanContext.destroyImage(defaultNormalTextureImage);
+    vkDestroySampler(m_vulkanContext.device, defaultSampler, nullptr);
 
-    globalDescriptors.destroyPools(vulkanContext.device);
+    globalDescriptors.destroyPools(m_vulkanContext.device);
 
     destroyStaticBuffers();
     if (m_lightBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_lightBuffer);
+        m_vulkanContext.destroyBuffer(m_lightBuffer);
     }
     if (m_modelTransformBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_modelTransformBuffer);
+        m_vulkanContext.destroyBuffer(m_modelTransformBuffer);
     }
 
-    vulkanContext.destroyBuffer(m_uniformBuffer);
-    vulkanContext.destroyBuffer(m_transformBuffer);
-    vulkanContext.destroyBuffer(m_jointBuffer);
+    m_vulkanContext.destroyBuffer(m_uniformBuffer);
+    m_vulkanContext.destroyBuffer(m_transformBuffer);
+    m_vulkanContext.destroyBuffer(m_jointBuffer);
 
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
         if (m_boundedUniformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedUniformBuffers[frame_i]);
+            m_vulkanContext.destroyBuffer(m_boundedUniformBuffers[frame_i]);
         }
         if (m_boundedTransformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedTransformBuffers[frame_i]);
+            m_vulkanContext.destroyBuffer(m_boundedTransformBuffers[frame_i]);
         }
         if (m_boundedJointBuffers[frame_i].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedJointBuffers[frame_i]);
+            m_vulkanContext.destroyBuffer(m_boundedJointBuffers[frame_i]);
         }
         if (m_boundedLightBuffers[frame_i].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedLightBuffers[frame_i]);
+            m_vulkanContext.destroyBuffer(m_boundedLightBuffers[frame_i]);
         }
         if (m_boundedModelTransformBuffer[frame_i].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[frame_i]);
+            m_vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[frame_i]);
         }
     }
 
-    vkDestroyDescriptorSetLayout(vulkanContext.device, globalDescriptorLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_vulkanContext.device, globalDescriptorLayout, nullptr);
 
-    vkDestroyPipelineLayout(vulkanContext.device, trianglePipelineLayout, nullptr);
-    vkDestroyPipeline(vulkanContext.device, trianglePipeline, nullptr);
+    vkDestroyPipelineLayout(m_vulkanContext.device, trianglePipelineLayout, nullptr);
+    vkDestroyPipeline(m_vulkanContext.device, trianglePipeline, nullptr);
 
-    vulkanContext.terminate();
+    m_vulkanContext.terminate();
 }
 
 void Renderer::drawGeometry(VkCommandBuffer cmd) {
@@ -442,16 +443,16 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
 
     createDrawDatas(cmd);
 
-    VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(vulkanContext.drawImage.imageView, nullptr);
-    VkRenderingAttachmentInfo depthAttachment = VkInit::depthAttachmentInfo(vulkanContext.depthImage.imageView);
+    VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(m_vulkanContext.drawImage.imageView, nullptr);
+    VkRenderingAttachmentInfo depthAttachment = VkInit::depthAttachmentInfo(m_vulkanContext.depthImage.imageView);
 
-    VkViewport viewport = VkInit::viewport(vulkanContext.windowExtent.width, vulkanContext.windowExtent.height);
+    VkViewport viewport = VkInit::viewport(m_vulkanContext.windowExtent.width, m_vulkanContext.windowExtent.height);
 
     VkRect2D scissor = {};
     scissor.offset.x = 0;
     scissor.offset.y = 0;
-    scissor.extent.width = vulkanContext.windowExtent.width;
-    scissor.extent.height = vulkanContext.windowExtent.height;
+    scissor.extent.width = m_vulkanContext.windowExtent.width;
+    scissor.extent.height = m_vulkanContext.windowExtent.height;
 
     glm::mat4 view = m_camera.getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport.width / viewport.height, 0.001f, 1e9f);
@@ -490,9 +491,10 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
         writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffers[currentFrame].buffer,
                            m_boundedLightBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
-    writer.updateSet(vulkanContext.device, bindlessDescriptorSets[currentFrame]);
+    writer.updateSet(m_vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
-    VkRenderingInfo renderInfo = VkInit::renderingInfo(vulkanContext.windowExtent, &colorAttachment, &depthAttachment);
+    VkRenderingInfo renderInfo = VkInit::renderingInfo(m_vulkanContext.windowExtent, &colorAttachment,
+                                                       &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
@@ -506,7 +508,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     }
 
     PushConstantsBindless pcb = {};
-    pcb.vertexBuffer = vulkanContext.getBufferAddress(m_boundedVertexBuffer);
+    pcb.vertexBuffer = m_vulkanContext.getBufferAddress(m_boundedVertexBuffer);
 
     for (const auto &drawData: m_drawDatas) {
         if (drawData.instanceCount == 0) {
@@ -536,32 +538,15 @@ void Renderer::initDefaultData() {
     m_materials.clear();
     m_joints = {glm::mat4(1.f)};
 
-    uint32_t defaultNormal = glm::packUnorm4x8(glm::vec4(0.5f, 0.5f, 1.f, 1.f));
-    uint32_t opaqueWhite = glm::packUnorm4x8(glm::vec4(1.f, 1.f, 1.f, 1.f));
-    uint32_t opaqueBlack = glm::packUnorm4x8(glm::vec4(0.f, 0.f, 0.f, 1.f));
-    uint32_t opaqueMagenta = glm::packUnorm4x8(glm::vec4(1.f, 0.f, 1.f, 1.f));
-    uint32_t opaqueCyan = glm::packUnorm4x8(glm::vec4(0.f, 1.f, 1.f, 1.f));
-
-    std::array<uint32_t, 8 * 8> checker = {};
-    for (size_t x = 0; x < 8; x++) {
-        for (size_t y = 0; y < 8; y++) {
-            checker[y * 8 + x] = ((x % 2) ^ (y % 2)) ? opaqueMagenta : opaqueBlack;
-        }
-    }
-
-    errorTextureImage = vulkanContext.createImage(checker.data(), VkExtent3D(8, 8, 1),
-                                                  VK_FORMAT_R8G8B8A8_UNORM,
-                                                  VK_IMAGE_USAGE_SAMPLED_BIT, false);
-
-    opaqueWhiteTextureImage = vulkanContext.createImage(&opaqueWhite, VkExtent3D(1, 1, 1),
-                                                        VK_FORMAT_R8G8B8A8_UNORM,
-                                                        VK_IMAGE_USAGE_SAMPLED_BIT, false);
-    defaultNormalTextureImage = vulkanContext.createImage(&defaultNormal, VkExtent3D(1, 1, 1),
+    opaqueWhiteTextureImage = m_vulkanContext.createImage(&VkUtil::opaqueWhite, VkExtent3D(1, 1, 1),
                                                           VK_FORMAT_R8G8B8A8_UNORM,
                                                           VK_IMAGE_USAGE_SAMPLED_BIT, false);
-    opaqueCyanTextureImage = vulkanContext.createImage(&opaqueCyan, VkExtent3D(1, 1, 1),
-                                                       VK_FORMAT_R8G8B8A8_UNORM,
-                                                       VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    defaultNormalTextureImage = m_vulkanContext.createImage(&VkUtil::defaultNormalMapColor, VkExtent3D(1, 1, 1),
+                                                            VK_FORMAT_R8G8B8A8_UNORM,
+                                                            VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    opaqueCyanTextureImage = m_vulkanContext.createImage(&VkUtil::opaqueCyan, VkExtent3D(1, 1, 1),
+                                                         VK_FORMAT_R8G8B8A8_UNORM,
+                                                         VK_IMAGE_USAGE_SAMPLED_BIT, false);
 
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -570,7 +555,7 @@ void Renderer::initDefaultData() {
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.maxLod = 16.f;
 
-    vkCreateSampler(vulkanContext.device, &samplerInfo, nullptr, &defaultSampler);
+    vkCreateSampler(m_vulkanContext.device, &samplerInfo, nullptr, &defaultSampler);
 
     Texture opaqueWhiteTexture = {
             "opaque_white_texture",
@@ -587,12 +572,6 @@ void Renderer::initDefaultData() {
     Texture opaqueCyanTexture = {
             "opaque_cyan_texture",
             opaqueCyanTextureImage.imageView,
-            defaultSampler
-    };
-
-    Texture errorTexture = {
-            "error_missing_texture",
-            errorTextureImage.imageView,
             defaultSampler
     };
 
@@ -618,19 +597,19 @@ void Renderer::initDefaultData() {
                           texture_i);
     }
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        writer.updateSet(vulkanContext.device, bindlessDescriptorSets[frame_i]);
+        writer.updateSet(m_vulkanContext.device, bindlessDescriptorSets[frame_i]);
     }
 }
 
 void Renderer::destroyStaticBuffers() {
     if (m_boundedIndexBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_boundedIndexBuffer);
+        m_vulkanContext.destroyBuffer(m_boundedIndexBuffer);
     }
     if (m_boundedVertexBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_boundedVertexBuffer);
+        m_vulkanContext.destroyBuffer(m_boundedVertexBuffer);
     }
     if (m_boundedMaterialBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_boundedMaterialBuffer);
+        m_vulkanContext.destroyBuffer(m_boundedMaterialBuffer);
     }
 }
 
@@ -757,7 +736,7 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
     std::vector<std::pair<uint32_t, std::vector<glm::mat4>>> modelsDrawn;
     for (auto &renderObject: m_renderObjects) {
         uint32_t modelId = renderObject.second.modelId;
-        glm::mat4& modelTransform = renderObject.second.modelMatrix;
+        glm::mat4 &modelTransform = renderObject.second.modelMatrix;
 
         auto it = std::find_if(modelsDrawn.begin(), modelsDrawn.end(),
                                [modelId](const std::pair<uint32_t, std::vector<glm::mat4>> &element) {
@@ -795,66 +774,66 @@ void Renderer::createDrawDatas(VkCommandBuffer cmd) {
 
     if (transformBufferSize != 0 && transformBufferSize != m_transformBuffer.info.size) {
         if (m_transformBuffer.buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_transformBuffer);
+            m_vulkanContext.destroyBuffer(m_transformBuffer);
         }
-        m_transformBuffer = vulkanContext.createBuffer(transformBufferSize,
-                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                       VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        m_transformBuffer = m_vulkanContext.createBuffer(transformBufferSize,
+                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                         VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     }
 
     if (transformBufferSize != 0 && transformBufferSize != m_boundedTransformBuffers[currentFrame].info.size) {
         if (m_boundedTransformBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedTransformBuffers[currentFrame]);
+            m_vulkanContext.destroyBuffer(m_boundedTransformBuffers[currentFrame]);
         }
-        m_boundedTransformBuffers[currentFrame] = vulkanContext.createBuffer(transformBufferSize,
-                                                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                             VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        m_boundedTransformBuffers[currentFrame] = m_vulkanContext.createBuffer(transformBufferSize,
+                                                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                               VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
     if (jointBufferSize != 0 && jointBufferSize != m_jointBuffer.info.size) {
         if (m_jointBuffer.buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_jointBuffer);
+            m_vulkanContext.destroyBuffer(m_jointBuffer);
         }
-        m_jointBuffer = vulkanContext.createBuffer(jointBufferSize,
-                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                   VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                   VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        m_jointBuffer = m_vulkanContext.createBuffer(jointBufferSize,
+                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                     VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                     VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     }
 
     if (jointBufferSize != 0 && jointBufferSize != m_boundedJointBuffers[currentFrame].info.size) {
         if (m_boundedJointBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedJointBuffers[currentFrame]);
+            m_vulkanContext.destroyBuffer(m_boundedJointBuffers[currentFrame]);
         }
-        m_boundedJointBuffers[currentFrame] = vulkanContext.createBuffer(jointBufferSize,
-                                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                         VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        m_boundedJointBuffers[currentFrame] = m_vulkanContext.createBuffer(jointBufferSize,
+                                                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                           VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
     if (modelTransformBufferSize != 0 && modelTransformBufferSize != m_modelTransformBuffer.info.size) {
         if (m_modelTransformBuffer.buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_modelTransformBuffer);
+            m_vulkanContext.destroyBuffer(m_modelTransformBuffer);
         }
-        m_modelTransformBuffer = vulkanContext.createBuffer(modelTransformBufferSize,
-                                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                            VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        m_modelTransformBuffer = m_vulkanContext.createBuffer(modelTransformBufferSize,
+                                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                              VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                              VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     }
 
     if (modelTransformBufferSize != 0 &&
         modelTransformBufferSize != m_boundedModelTransformBuffer[currentFrame].info.size) {
         if (m_boundedModelTransformBuffer[currentFrame].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[currentFrame]);
+            m_vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[currentFrame]);
         }
-        m_boundedModelTransformBuffer[currentFrame] = vulkanContext.createBuffer(modelTransformBufferSize,
-                                                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                                 VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        m_boundedModelTransformBuffer[currentFrame] = m_vulkanContext.createBuffer(modelTransformBufferSize,
+                                                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                                   VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
     // update buffers contents
@@ -902,24 +881,24 @@ void Renderer::updateLightBuffer(VkCommandBuffer cmd) {
     size_t lightBufferSize = m_lights.size() * sizeof(Light);
 
     if (m_lightBuffer.buffer != VK_NULL_HANDLE) {
-        vulkanContext.destroyBuffer(m_lightBuffer);
+        m_vulkanContext.destroyBuffer(m_lightBuffer);
     }
 
-    m_lightBuffer = vulkanContext.createBuffer(lightBufferSize,
-                                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                               VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    m_lightBuffer = m_vulkanContext.createBuffer(lightBufferSize,
+                                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                 VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
     void *data = m_lightBuffer.info.pMappedData;
     memcpy(data, m_lights.data(), lightBufferSize);
 
     if (lightBufferSize != m_boundedLightBuffers[currentFrame].info.size) {
         if (m_boundedLightBuffers[currentFrame].buffer != VK_NULL_HANDLE) {
-            vulkanContext.destroyBuffer(m_boundedLightBuffers[currentFrame]);
+            m_vulkanContext.destroyBuffer(m_boundedLightBuffers[currentFrame]);
         }
-        m_boundedLightBuffers[currentFrame] = vulkanContext.createBuffer(lightBufferSize,
-                                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                         VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+        m_boundedLightBuffers[currentFrame] = m_vulkanContext.createBuffer(lightBufferSize,
+                                                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                           VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     }
 
     VkBufferCopy lightCopy = {0};

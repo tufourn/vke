@@ -1,3 +1,4 @@
+#include <array>
 #include "VulkanUtils.h"
 #include "VulkanInit.h"
 
@@ -140,5 +141,16 @@ namespace VkUtil {
         transitionImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
+    }
+
+    std::array<uint32_t, 8 * 8> createCheckerboard(uint32_t color1, uint32_t color2) {
+        std::array<uint32_t, 8 * 8> checker = {};
+        for (size_t x = 0; x < 8; x++) {
+            for (size_t y = 0; y < 8; y++) {
+                checker[y * 8 + x] = ((x % 2) ^ (y % 2)) ? color1 : color2;
+            }
+        }
+
+        return checker;
     }
 }
