@@ -5,6 +5,7 @@
 #include <GltfLoader.h>
 #include "Timer.h"
 #include "MeshGenerator.h"
+#include "Skybox.h"
 
 constexpr uint32_t LOAD_FAILED = UINT32_MAX;
 
@@ -22,6 +23,15 @@ struct PushConstantsBindless {
 
     uint32_t modelTransformOffset;
     float pad[3];
+};
+
+struct PushConstantsSkybox {
+    VkDeviceAddress vertexBuffer;
+};
+
+struct UniformSkybox {
+    glm::mat4 proj;
+    glm::mat4 model;
 };
 
 // holds draw command parameters: offsets for the bounded buffers and instance count
@@ -105,6 +115,14 @@ private:
     VkPipeline trianglePipeline;
     VkPipelineLayout trianglePipelineLayout;
 
+    DescriptorAllocator skyboxDescriptors = {};
+    VkDescriptorSetLayout skyboxDescriptorLayout = {};
+    std::array<VkDescriptorSet, MAX_CONCURRENT_FRAMES> skyboxDescriptorSets;
+    VkPipeline skyboxPipeline;
+    VkPipelineLayout skyboxPipelineLayout;
+    VulkanBuffer m_skyboxUniformBuffer;
+    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedSkyboxUniformBuffer;
+
     DescriptorAllocator globalDescriptors = {};
     VkDescriptorSetLayout globalDescriptorLayout = {};
     std::array<VkDescriptorSet, MAX_CONCURRENT_FRAMES> bindlessDescriptorSets;
@@ -142,6 +160,8 @@ private:
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedLightBuffers;
     std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedModelTransformBuffer;
 
+    std::unique_ptr<Skybox> m_skybox;
+
     Timer m_timer;
 
     Stats m_stats;
@@ -161,6 +181,8 @@ private:
     void updateLightPos(uint32_t lightIndex);
 
     void updateRenderObjects();
+
+    void initSkyboxPipeline();
 
     VulkanImage opaqueWhiteTextureImage = {};
     VulkanImage opaqueCyanTextureImage = {};

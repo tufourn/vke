@@ -60,6 +60,11 @@ void Camera::mouseCallback(GLFWwindow *window, double xPos, double yPos) {
 void Camera::processKeypress(int key, int action) {
     if (action == GLFW_PRESS) {
         switch (key) {
+            case GLFW_KEY_R: // reset camera
+                position = glm::vec3(0.f, 0.f, 5.f);
+                pitch = 0.f;
+                yaw = 0.f;
+                break;
             case GLFW_KEY_W:
                 velocity.z = -1;
                 break;

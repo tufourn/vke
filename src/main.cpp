@@ -15,8 +15,8 @@ int main() {
         renderer.addLight(pointLight);
     }
 
-    uint32_t cesiumManId = renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
-    renderer.addRenderObject({glm::mat4(1.f), cesiumManId});
+    uint32_t id = renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
+    renderer.addRenderObject({glm::mat4(1.f), id});
 
     renderer.run();
 }
