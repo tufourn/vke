@@ -16,7 +16,8 @@ static constexpr uint32_t MATERIAL_BINDING = 2;
 static constexpr uint32_t JOINT_BINDING = 3;
 static constexpr uint32_t MODEL_TRANSFORM_BINDING = 4;
 static constexpr uint32_t LIGHT_BINDING = 5;
-static constexpr uint32_t TEXTURE_BINDING = 6;
+static constexpr uint32_t IRRADIANCE_MAP_BINDING = 6;
+static constexpr uint32_t TEXTURE_BINDING = 7;
 
 Renderer::Renderer() {
     setupVulkan();
@@ -282,9 +283,11 @@ void Renderer::setupVulkan() {
     descriptorLayoutBuilder.addBinding(JOINT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(MODEL_TRANSFORM_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     descriptorLayoutBuilder.addBinding(LIGHT_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    descriptorLayoutBuilder.addBinding(IRRADIANCE_MAP_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     descriptorLayoutBuilder.addBinding(TEXTURE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    std::array<VkDescriptorBindingFlags, 7> flagArray = {
+    std::array<VkDescriptorBindingFlags, 8> flagArray = {
+            0,
             0,
             0,
             0,
@@ -309,7 +312,7 @@ void Renderer::setupVulkan() {
 
     std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2},
             {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         5},
     };
 
@@ -370,7 +373,7 @@ void Renderer::setupVulkan() {
     m_skybox = std::make_unique<Skybox>(&this->m_vulkanContext);
 //    m_skybox->load("assets/skyboxes/equirectangular/816-hdri-skies-com.hdr");
     m_skybox->load("assets/skyboxes/equirectangular/free_hdri_sky_816.jpg");
-    m_skybox->createCubemap();
+    m_skybox->init();
 
     initDefaultData();
 
@@ -516,6 +519,9 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
         writer.writeBuffer(LIGHT_BINDING, m_boundedLightBuffers[currentFrame].buffer,
                            m_boundedLightBuffers[currentFrame].info.size, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
+    writer.writeImage(IRRADIANCE_MAP_BINDING, m_skybox->irradianceMap.imageView, m_skybox->sampler,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0);
     writer.updateSet(m_vulkanContext.device, bindlessDescriptorSets[currentFrame]);
 
     VkRenderingInfo renderInfo = VkInit::renderingInfo(m_vulkanContext.windowExtent, &colorAttachment,
@@ -1014,10 +1020,10 @@ uint32_t Renderer::addRenderObject(RenderObjectInfo info) {
 }
 
 void Renderer::updateRenderObjects() {
-    for (auto &renderObject: m_renderObjects) {
-        renderObject.second.modelMatrix = glm::rotate(renderObject.second.modelMatrix, 0.2f * m_timer.deltaTime(),
-                                                      glm::vec3(0.0, 1.0, 0.0));
-    }
+//    for (auto &renderObject: m_renderObjects) {
+//        renderObject.second.modelMatrix = glm::rotate(renderObject.second.modelMatrix, 0.2f * m_timer.deltaTime(),
+//                                                      glm::vec3(0.0, 1.0, 0.0));
+//    }
 }
 
 void Renderer::initSkyboxPipeline() {

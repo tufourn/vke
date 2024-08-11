@@ -41,12 +41,13 @@ public:
 
     VulkanImage loadedImage;
     VulkanImage cubemap;
+    VulkanImage irradianceMap;
     VkSampler sampler;
 
     VulkanBuffer vertexBuffer;
     VulkanBuffer indexBuffer;
 
-    void createCubemap();
+    void init();
 
 private:
     VulkanContext *m_vulkanContext;
@@ -56,10 +57,14 @@ private:
     VkDescriptorSet cubemapDescriptorSet;
     VkPipelineLayout cubemapPipelineLayout;
     VkPipeline cubemapPipeline;
+    VkPipeline irradianceMapPipeline;
 
     void createOffscreenDrawImage();
     VulkanImage createCubemapImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage);
-    void createCubemapPipeline();
+
+    void createPipelines();
+    void createCubemap();
+    void createIrradianceMap();
 
     VulkanImage m_offscreenImage;
 

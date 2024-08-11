@@ -13,7 +13,7 @@ A Vulkan renderer. It's primarily a playground for me to learn and try to implem
 - [x] Physically-based rendering
 - [x] Animations with vertex skinning
 - [x] Normal mapping, with [MikkTSpace](https://github.com/mmikk/MikkTSpace) tangent calculation
-- [x] Environment cubemap (curnently only supports equirectangular images)
+- [x] Environment cubemap (currently only supports equirectangular images)
 
 ## Todos
 - [ ] Image based lighting

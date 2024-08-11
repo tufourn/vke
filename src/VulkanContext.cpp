@@ -321,7 +321,7 @@ void VulkanContext::immediateSubmit(std::function<void(VkCommandBuffer cmd)> &&f
     VkSubmitInfo2 submitInfo = VkInit::submitInfo(&cmdSubmitInfo, nullptr, nullptr);
     VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submitInfo, m_immediateFence))
 
-    VK_CHECK(vkWaitForFences(device, 1, &m_immediateFence, true, 1e9))
+    VK_CHECK(vkWaitForFences(device, 1, &m_immediateFence, true, 1e10))
 }
 
 VkDeviceAddress VulkanContext::getBufferAddress(const VulkanBuffer &buffer) const {

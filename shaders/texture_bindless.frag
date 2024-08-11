@@ -26,7 +26,9 @@ layout(set = 0, binding = 5) readonly buffer lightBuffer {
     Light lights[];
 };
 
-layout(set = 0, binding = 6) uniform sampler2D displayTexture[];
+layout(set = 0, binding = 6) uniform samplerCube irradianceMap;
+
+layout(set = 0, binding = 7) uniform sampler2D displayTexture[];
 
 struct Vertex {
     vec3 position;
@@ -117,6 +119,11 @@ float Fd_Lambert() {
     return 1.0 / PI;
 }
 
+vec3 fresnelSchlickRoughness(float NoV, vec3 f0, float roughness)
+{
+    return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - NoV, 0.0, 1.0), 5.0);
+}
+
 void main()
 {
     Material material = materials[pc.materialOffset];
@@ -147,6 +154,16 @@ void main()
     n = normalize(inTBN * (n * 2.0 - 1.0));
 
     vec3 outColor = vec3(0.0);
+
+    float NoV = abs(dot(n, v)) + 1e-5;
+    vec3 kS = fresnelSchlickRoughness(NoV, f0, roughness);
+    vec3 kD = 1.0 - kS;
+    kD *= 1.0 - metallic;
+    vec3 irradiance = texture(irradianceMap, n).rgb;
+    vec3 diffuse = irradiance * diffuseColor;
+    vec3 ambient = (kD * diffuse);
+
+    outColor += ambient;
 
     for (uint i = 0; i < globalUniform.numLights; i++) {
         Light light = lights[i];

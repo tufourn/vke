@@ -15,7 +15,7 @@ int main() {
         renderer.addLight(pointLight);
     }
 
-    uint32_t id = renderer.loadGltf("assets/models/helmet/DamagedHelmet.gltf");
+    uint32_t id = renderer.loadGltf("assets/models/tests/MetalRoughSpheres.gltf");
     renderer.addRenderObject({glm::mat4(1.f), id});
 
     renderer.run();
