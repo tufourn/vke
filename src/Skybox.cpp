@@ -63,6 +63,10 @@ Skybox::Skybox(VulkanContext *vulkanContext) : m_vulkanContext(vulkanContext) {
                                        VK_IMAGE_USAGE_SAMPLED_BIT |
                                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    prefilteredCube = createCubemapImage({cubeRes, cubeRes, 1}, VK_FORMAT_R32G32B32A32_SFLOAT,
+                                         VK_IMAGE_USAGE_SAMPLED_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 
     m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
         VkUtil::transitionImage(cmd, cubemap.image,
@@ -71,6 +75,10 @@ Skybox::Skybox(VulkanContext *vulkanContext) : m_vulkanContext(vulkanContext) {
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                 VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
         VkUtil::transitionImage(cmd, irradianceMap.image,
+                                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::transitionImage(cmd, prefilteredCube.image,
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -123,10 +131,12 @@ Skybox::~Skybox() {
     m_vulkanContext->destroyImage(m_offscreenImage);
     m_vulkanContext->destroyImage(cubemap);
     m_vulkanContext->destroyImage(irradianceMap);
+    m_vulkanContext->destroyImage(prefilteredCube);
 
     vkDestroyPipelineLayout(m_vulkanContext->device, cubemapPipelineLayout, nullptr);
     vkDestroyPipeline(m_vulkanContext->device, cubemapPipeline, nullptr);
     vkDestroyPipeline(m_vulkanContext->device, irradianceMapPipeline, nullptr);
+    vkDestroyPipeline(m_vulkanContext->device, prefilteredCubePipeline, nullptr);
 
     cubemapDescriptors.destroyPools(m_vulkanContext->device);
     vkDestroyDescriptorSetLayout(m_vulkanContext->device, cubemapDescriptorLayout, nullptr);
@@ -148,7 +158,7 @@ void Skybox::createCubemap() {
             .extent = {m_offscreenImage.imageExtent.width, m_offscreenImage.imageExtent.height}
     };
 
-    SkyboxPushBlock pc = {};
+    CubemapConstants pc = {};
     pc.vertexBuffer = m_vulkanContext->getBufferAddress(vertexBuffer);
 
     DescriptorWriter writer;
@@ -170,7 +180,7 @@ void Skybox::createCubemap() {
                                     0, 1, &cubemapDescriptorSet, 0, nullptr);
             vkCmdBindIndexBuffer(cmd, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(cmd, cubemapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(SkyboxPushBlock),
+                               0, sizeof(CubemapConstants),
                                &pc);
             vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
             vkCmdEndRendering(cmd);
@@ -220,7 +230,7 @@ void Skybox::createCubemap() {
 void Skybox::createPipelines() {
     VkPushConstantRange range = {};
     range.offset = 0;
-    range.size = sizeof(SkyboxPushBlock);
+    range.size = sizeof(CubemapConstants);
     range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     DescriptorLayoutBuilder layoutBuilder;
@@ -264,9 +274,16 @@ void Skybox::createPipelines() {
     pipelineBuilder.setShaders(cubemapVertShader, irradianceMapFragShader);
     irradianceMapPipeline = pipelineBuilder.build(m_vulkanContext->device);
 
+    VkShaderModule prefilteredCubeFragShader;
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/prefiltered_cube.frag.spv", &prefilteredCubeFragShader))
+
+    pipelineBuilder.setShaders(cubemapVertShader, prefilteredCubeFragShader);
+    prefilteredCubePipeline = pipelineBuilder.build(m_vulkanContext->device);
+
     vkDestroyShaderModule(m_vulkanContext->device, cubemapVertShader, nullptr);
     vkDestroyShaderModule(m_vulkanContext->device, cubemapFragShader, nullptr);
     vkDestroyShaderModule(m_vulkanContext->device, irradianceMapFragShader, nullptr);
+    vkDestroyShaderModule(m_vulkanContext->device, prefilteredCubeFragShader, nullptr);
 }
 
 void Skybox::createOffscreenDrawImage() {
@@ -319,6 +336,7 @@ void Skybox::init() {
     createPipelines();
     createCubemap();
     createIrradianceMap();
+    createPrefilteredCube();
 }
 
 void Skybox::createIrradianceMap() {
@@ -336,8 +354,9 @@ void Skybox::createIrradianceMap() {
             .extent = {m_offscreenImage.imageExtent.width, m_offscreenImage.imageExtent.height}
     };
 
-    SkyboxPushBlock pc = {};
+    CubemapConstants pc = {};
     pc.vertexBuffer = m_vulkanContext->getBufferAddress(vertexBuffer);
+    pc.sampleDelta = 0.05;
 
     DescriptorWriter writer;
     writer.writeImage(0, cubemap.imageView, sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -358,7 +377,7 @@ void Skybox::createIrradianceMap() {
                                     0, 1, &cubemapDescriptorSet, 0, nullptr);
             vkCmdBindIndexBuffer(cmd, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(cmd, cubemapPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(SkyboxPushBlock),
+                               0, sizeof(CubemapConstants),
                                &pc);
             vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
             vkCmdEndRendering(cmd);
@@ -402,6 +421,105 @@ void Skybox::createIrradianceMap() {
 
     m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
         VkUtil::generateCubeMipmaps(cmd, irradianceMap.image, {cubeRes, cubeRes}, 6);
+    });
+}
+
+void Skybox::createPrefilteredCube() {
+    if (!m_loaded) {
+        return;
+    }
+
+    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(cubeRes))) + 1;
+
+    VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(m_offscreenImage.imageView, nullptr);
+    VkRenderingInfo renderInfo = VkInit::renderingInfo(
+            {m_offscreenImage.imageExtent.width, m_offscreenImage.imageExtent.height}, &colorAttachment, nullptr);
+
+
+    CubemapConstants pc = {};
+    pc.vertexBuffer = m_vulkanContext->getBufferAddress(vertexBuffer);
+    pc.sampleCount = 1024;
+    pc.roughness = 0.1f;
+
+    DescriptorWriter writer;
+    writer.writeImage(0, cubemap.imageView, sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0);
+    writer.updateSet(m_vulkanContext->device, cubemapDescriptorSet);
+
+    for (uint32_t mip = 0; mip < mipLevels; mip++) {
+        pc.roughness = static_cast<float>(mip) / static_cast<float>(mipLevels - 1);
+        for (size_t face_i = 0; face_i < faceMatrices.size(); face_i++) {
+            float width = static_cast<float>(cubeRes * std::pow(0.5f, mip));
+            float height = width;
+            VkViewport viewport = VkInit::viewport(width, height);
+            VkRect2D scissor = {
+                    .offset = {0, 0},
+                    .extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
+            };
+
+            pc.matrix =
+                    glm::perspective((float) (std::numbers::pi / 2.0), 1.0f, 0.1f, (float) cubeRes) *
+                    faceMatrices[face_i];
+
+            m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
+                // draw one face of cube
+                vkCmdBeginRendering(cmd, &renderInfo);
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, prefilteredCubePipeline);
+                vkCmdSetViewport(cmd, 0, 1, &viewport);
+                vkCmdSetScissor(cmd, 0, 1, &scissor);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cubemapPipelineLayout,
+                                        0, 1, &cubemapDescriptorSet, 0, nullptr);
+                vkCmdBindIndexBuffer(cmd, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdPushConstants(cmd, cubemapPipelineLayout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0, sizeof(CubemapConstants),
+                                   &pc);
+                vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
+                vkCmdEndRendering(cmd);
+
+                // transition drawn image to transfer src to copy to cubemap texture
+                VkUtil::transitionImage(cmd, m_offscreenImage.image,
+                                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+
+                VkImageCopy copyRegion = {};
+                copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copyRegion.srcSubresource.baseArrayLayer = 0;
+                copyRegion.srcSubresource.mipLevel = 0;
+                copyRegion.srcSubresource.layerCount = 1;
+                copyRegion.srcOffset = {0, 0, 0};
+
+                copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copyRegion.dstSubresource.baseArrayLayer = face_i;
+                copyRegion.dstSubresource.mipLevel = mip;
+                copyRegion.dstSubresource.layerCount = 1;
+                copyRegion.dstOffset = {0, 0, 0};
+
+                copyRegion.extent.width = static_cast<uint32_t>(viewport.width);
+                copyRegion.extent.height = static_cast<uint32_t>(viewport.height);
+                copyRegion.extent.depth = 1;
+
+                vkCmdCopyImage(
+                        cmd, m_offscreenImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        prefilteredCube.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &copyRegion
+                );
+
+                // transition drawn image back to color attachment
+                VkUtil::transitionImage(cmd, m_offscreenImage.image,
+                                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT,
+                                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+            });
+        }
+    }
+
+    m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
+        VkUtil::transitionImage(cmd, prefilteredCube.image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
     });
 
 }

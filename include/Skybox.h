@@ -9,9 +9,13 @@ class VulkanContext;
 
 static constexpr uint32_t cubeRes = 1024;
 
-struct SkyboxPushBlock {
+// todo: these should be separated into ranges
+struct CubemapConstants {
     glm::mat4 matrix;
     VkDeviceAddress vertexBuffer;
+    float sampleDelta = 0.05; // used for irradiance map
+    uint32_t sampleCount = 32; // used for prefiltered env
+    float roughness; // used for prefiltered env
 };
 
 static const std::array<glm::mat4, 6> faceMatrices = {
@@ -42,6 +46,7 @@ public:
     VulkanImage loadedImage;
     VulkanImage cubemap;
     VulkanImage irradianceMap;
+    VulkanImage prefilteredCube;
     VkSampler sampler;
 
     VulkanBuffer vertexBuffer;
@@ -58,6 +63,7 @@ private:
     VkPipelineLayout cubemapPipelineLayout;
     VkPipeline cubemapPipeline;
     VkPipeline irradianceMapPipeline;
+    VkPipeline prefilteredCubePipeline;
 
     void createOffscreenDrawImage();
     VulkanImage createCubemapImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage);
@@ -65,6 +71,7 @@ private:
     void createPipelines();
     void createCubemap();
     void createIrradianceMap();
+    void createPrefilteredCube();
 
     VulkanImage m_offscreenImage;
 

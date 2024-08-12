@@ -8,5 +8,5 @@ layout (set = 0, binding = 1) uniform samplerCube samplerEnv;
 
 void main() {
     outColor = texture(samplerEnv, inUVW);
-//    outColor = vec4(1.f, 1.f, 1.f, 1.f);
+//    outColor = textureLod(samplerEnv, inUVW, 10); // test prefiltered map
 }

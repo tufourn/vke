@@ -18,9 +18,12 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer {
 
 layout (location = 0) out vec3 outUVW;
 
-layout(push_constant) uniform skyboxConstants {
+layout(push_constant) uniform cubemapConstants {
     mat4 matrix;
     VertexBuffer vertexBuffer;
+    float sampleDelta;
+    uint sampleCount;
+    float roughness;
 } pc;
 
 void main() {

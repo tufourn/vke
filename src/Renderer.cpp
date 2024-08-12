@@ -480,7 +480,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     DescriptorWriter skyboxWriter;
     skyboxWriter.writeBuffer(0, m_boundedSkyboxUniformBuffer[currentFrame].buffer, sizeof(UniformSkybox), 0,
                              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    skyboxWriter.writeImage(1, m_skybox->cubemap.imageView, m_skybox->sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    skyboxWriter.writeImage(1, m_skybox->prefilteredCube.imageView, m_skybox->sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0);
     skyboxWriter.updateSet(m_vulkanContext.device, skyboxDescriptorSets[currentFrame]);
 

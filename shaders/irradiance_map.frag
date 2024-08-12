@@ -1,4 +1,5 @@
 #version 460
+#extension GL_EXT_buffer_reference : require
 
 layout (location = 0) in vec3 inUVW;
 
@@ -7,6 +8,29 @@ layout (location = 0) out vec4 outColor;
 layout (set = 0, binding = 0) uniform samplerCube envMap;
 
 const float PI = 3.141592653589;
+
+struct Vertex {
+    vec3 position;
+    float uv_x;
+    vec3 normal;
+    float uv_y;
+    vec4 tangent;
+    vec4 bitangent;
+    vec4 jointIndices;
+    vec4 jointWeights;
+};
+
+layout(buffer_reference, std430) readonly buffer VertexBuffer {
+    Vertex vertices[];
+};
+
+layout(push_constant) uniform cubemapConstants {
+    mat4 matrix;
+    VertexBuffer vertexBuffer;
+    float sampleDelta;
+    uint sampleCount;
+    float roughness;
+} pc;
 
 void main() {
     vec3 normal = normalize(inUVW);
@@ -17,7 +41,8 @@ void main() {
     vec3 right = normalize(cross(up, normal));
     up = normalize(cross(normal, right));
 
-    float sampleDelta = 0.05;
+    float sampleDelta = pc.sampleDelta;
+
     float nrSamples = 0.0;
 
     for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta) {
