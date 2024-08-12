@@ -183,10 +183,10 @@ void main()
         vec3 F = F_Schlick(LoH, f0);
         float V = V_SmithGGXCorrelatedFast(NoV, NoL, roughness);
 
-        vec3 Fr = (D * V) * F;
+        vec3 Fr = (D * V) * F / (4 * NoV);
         vec3 Fd = diffuseColor;// * Fd_Lambert()
 
-        outColor += (Fd + Fr) * NoL / globalUniform.numLights;
+        outColor += (Fd * (1 - F) + Fr) * NoL / globalUniform.numLights;
     }
 
     outColor += emissive;

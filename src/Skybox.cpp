@@ -56,15 +56,20 @@ Skybox::Skybox(VulkanContext *vulkanContext) : m_vulkanContext(vulkanContext) {
     createOffscreenDrawImage();
 
     cubemap = createCubemapImage({cubeRes, cubeRes, 1}, VK_FORMAT_R32G32B32A32_SFLOAT,
-                                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+                                 VK_IMAGE_USAGE_SAMPLED_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     irradianceMap = createCubemapImage({cubeRes, cubeRes, 1}, VK_FORMAT_R32G32B32A32_SFLOAT,
-                                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+                                       VK_IMAGE_USAGE_SAMPLED_BIT |
+                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 
     m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
         VkUtil::transitionImage(cmd, cubemap.image,
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
         VkUtil::transitionImage(cmd, irradianceMap.image,
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
@@ -185,12 +190,12 @@ void Skybox::createCubemap() {
 
             copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             copyRegion.dstSubresource.baseArrayLayer = face_i;
-            copyRegion.dstSubresource.mipLevel = 0; // TODO: add mipmap copy
+            copyRegion.dstSubresource.mipLevel = 0;
             copyRegion.dstSubresource.layerCount = 1;
             copyRegion.dstOffset = {0, 0, 0};
 
-            copyRegion.extent.width = static_cast<uint32_t>(viewport.width);
-            copyRegion.extent.height = static_cast<uint32_t>(viewport.height);
+            copyRegion.extent.width = static_cast<uint32_t>(cubeRes);
+            copyRegion.extent.height = static_cast<uint32_t>(cubeRes);
             copyRegion.extent.depth = 1;
 
             vkCmdCopyImage(
@@ -208,10 +213,7 @@ void Skybox::createCubemap() {
     }
 
     m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
-        VkUtil::transitionImage(cmd, cubemap.image,
-                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::generateCubeMipmaps(cmd, cubemap.image, {cubeRes, cubeRes}, 6);
     });
 }
 
@@ -289,8 +291,7 @@ VulkanImage Skybox::createCubemapImage(VkExtent3D extent, VkFormat format, VkIma
     newImage.imageExtent = extent;
 
     VkImageCreateInfo imgInfo = VkInit::imageCreateInfo(format, usage, extent);
-    // todo: add mipmaps
-//    imgInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(extent.width, extent.height)))) + 1;
+    imgInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(cubeRes))) + 1;
     imgInfo.arrayLayers = 6;
     imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
@@ -377,7 +378,7 @@ void Skybox::createIrradianceMap() {
 
             copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             copyRegion.dstSubresource.baseArrayLayer = face_i;
-            copyRegion.dstSubresource.mipLevel = 0; // TODO: add mipmap copy
+            copyRegion.dstSubresource.mipLevel = 0;
             copyRegion.dstSubresource.layerCount = 1;
             copyRegion.dstOffset = {0, 0, 0};
 
@@ -400,10 +401,7 @@ void Skybox::createIrradianceMap() {
     }
 
     m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
-        VkUtil::transitionImage(cmd, irradianceMap.image,
-                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::generateCubeMipmaps(cmd, irradianceMap.image, {cubeRes, cubeRes}, 6);
     });
 
 }

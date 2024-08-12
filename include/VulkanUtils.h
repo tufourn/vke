@@ -40,6 +40,7 @@ namespace VkUtil {
     void copyImageToImage(VkCommandBuffer cmd, VkImage src, VkImage dst, VkExtent2D srcSize, VkExtent2D dstSize);
 
     void generateMipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D imageSize);
+    void generateCubeMipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D imageSize, uint32_t layerCount);
 
     std::array<uint32_t, 8 * 8> createCheckerboard(uint32_t color1 = opaqueBlack, uint32_t color2 = opaqueMagenta);
 }
