@@ -47,6 +47,7 @@ public:
     VulkanImage cubemap;
     VulkanImage irradianceMap;
     VulkanImage prefilteredCube;
+    VulkanImage brdfLUT;
     VkSampler sampler;
 
     VulkanBuffer vertexBuffer;
@@ -64,6 +65,7 @@ private:
     VkPipeline cubemapPipeline;
     VkPipeline irradianceMapPipeline;
     VkPipeline prefilteredCubePipeline;
+    VkPipeline brdfLUTPipeline;
 
     void createOffscreenDrawImage();
     VulkanImage createCubemapImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage);
@@ -72,6 +74,7 @@ private:
     void createCubemap();
     void createIrradianceMap();
     void createPrefilteredCube();
+    void createBrdfLUT();
 
     VulkanImage m_offscreenImage;
 

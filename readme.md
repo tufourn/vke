@@ -5,7 +5,6 @@ A Vulkan renderer. It's primarily a playground for me to learn and try to implem
 
 ### Screenshots
 ![helmet](screenshots/helmet.gif)
-![cesium_man](screenshots/cesium_man.gif)
 
 ## Features
 - [x] Bindless resources
@@ -14,9 +13,9 @@ A Vulkan renderer. It's primarily a playground for me to learn and try to implem
 - [x] Animations with vertex skinning
 - [x] Normal mapping, with [MikkTSpace](https://github.com/mmikk/MikkTSpace) tangent calculation
 - [x] Environment cubemap (currently only supports equirectangular images)
+- [x] Image based lighting
 
 ## Todos
-- [ ] Image based lighting
 - [ ] Shadow mapping
 - [ ] Compute based culling
 

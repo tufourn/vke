@@ -28,7 +28,11 @@ layout(set = 0, binding = 5) readonly buffer lightBuffer {
 
 layout(set = 0, binding = 6) uniform samplerCube irradianceMap;
 
-layout(set = 0, binding = 7) uniform sampler2D displayTexture[];
+layout(set = 0, binding = 7) uniform samplerCube prefilteredCube;
+
+layout(set = 0, binding = 8) uniform sampler2D brdfLUT;
+
+layout(set = 0, binding = 9) uniform sampler2D displayTexture[];
 
 struct Vertex {
     vec3 position;
@@ -124,6 +128,11 @@ vec3 fresnelSchlickRoughness(float NoV, vec3 f0, float roughness)
     return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - NoV, 0.0, 1.0), 5.0);
 }
 
+float lodFromRoughness(float roughness) {
+    const float MAX_LOD = 10.0; // cube res is 1024
+    return roughness * MAX_LOD;
+}
+
 void main()
 {
     Material material = materials[pc.materialOffset];
@@ -159,35 +168,42 @@ void main()
     vec3 kS = fresnelSchlickRoughness(NoV, f0, roughness);
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallic;
+
     vec3 irradiance = texture(irradianceMap, n).rgb;
     vec3 diffuse = irradiance * diffuseColor;
-    vec3 ambient = (kD * diffuse);
+
+    vec3 r = reflect(v, n);
+    vec3 prefilteredColor = textureLod(prefilteredCube, r, lodFromRoughness(roughness)).rgb;
+    vec2 envBRDF = texture(brdfLUT, vec2(NoV, roughness)).xy;
+    vec3 specular = prefilteredColor * (kS * envBRDF.x + envBRDF.y);
+
+    vec3 ambient = (kD * diffuse + specular);
 
     outColor += ambient;
 
-    for (uint i = 0; i < globalUniform.numLights; i++) {
-        Light light = lights[i];
-
-        // light vector
-        vec3 l = normalize(light.position - inFragPos);
-
-        // halfway vector
-        vec3 h = normalize(l + v);
-
-        float NoV = abs(dot(n, v)) + 1e-5;
-        float NoL = clamp(dot(n, l), 0.0, 1.0);
-        float NoH = clamp(dot(n, h), 0.0, 1.0);
-        float LoH = clamp(dot(l, h), 0.0, 1.0);
-
-        float D = D_GGX(NoH, roughness);
-        vec3 F = F_Schlick(LoH, f0);
-        float V = V_SmithGGXCorrelatedFast(NoV, NoL, roughness);
-
-        vec3 Fr = (D * V) * F / (4 * NoV);
-        vec3 Fd = diffuseColor;// * Fd_Lambert()
-
-        outColor += (Fd * (1 - F) + Fr) * NoL / globalUniform.numLights;
-    }
+//    for (uint i = 0; i < globalUniform.numLights; i++) {
+//        Light light = lights[i];
+//
+//        // light vector
+//        vec3 l = normalize(light.position - inFragPos);
+//
+//        // halfway vector
+//        vec3 h = normalize(l + v);
+//
+//        float NoV = abs(dot(n, v)) + 1e-5;
+//        float NoL = clamp(dot(n, l), 0.0, 1.0);
+//        float NoH = clamp(dot(n, h), 0.0, 1.0);
+//        float LoH = clamp(dot(l, h), 0.0, 1.0);
+//
+//        float D = D_GGX(NoH, roughness);
+//        vec3 F = F_Schlick(LoH, f0);
+//        float V = V_SmithGGXCorrelatedFast(NoV, NoL, roughness);
+//
+//        vec3 Fr = (D * V) * F / (4 * NoV);
+//        vec3 Fd = diffuseColor;// * Fd_Lambert()
+//
+//        outColor += (Fd * (1 - F) + Fr) * NoL / globalUniform.numLights;
+//    }
 
     outColor += emissive;
     outFragColor = fromLinear(vec4(outColor, baseColor.a));

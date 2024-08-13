@@ -67,6 +67,11 @@ Skybox::Skybox(VulkanContext *vulkanContext) : m_vulkanContext(vulkanContext) {
                                          VK_IMAGE_USAGE_SAMPLED_BIT |
                                          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    brdfLUT = m_vulkanContext->createImage({cubeRes, cubeRes, 1}, VK_FORMAT_R32G32B32A32_SFLOAT,
+                                           VK_IMAGE_USAGE_SAMPLED_BIT |
+                                           VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                           false);
 
     m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
         VkUtil::transitionImage(cmd, cubemap.image,
@@ -79,6 +84,10 @@ Skybox::Skybox(VulkanContext *vulkanContext) : m_vulkanContext(vulkanContext) {
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
         VkUtil::transitionImage(cmd, prefilteredCube.image,
+                                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+        VkUtil::transitionImage(cmd, brdfLUT.image,
                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -132,11 +141,13 @@ Skybox::~Skybox() {
     m_vulkanContext->destroyImage(cubemap);
     m_vulkanContext->destroyImage(irradianceMap);
     m_vulkanContext->destroyImage(prefilteredCube);
+    m_vulkanContext->destroyImage(brdfLUT);
 
     vkDestroyPipelineLayout(m_vulkanContext->device, cubemapPipelineLayout, nullptr);
     vkDestroyPipeline(m_vulkanContext->device, cubemapPipeline, nullptr);
     vkDestroyPipeline(m_vulkanContext->device, irradianceMapPipeline, nullptr);
     vkDestroyPipeline(m_vulkanContext->device, prefilteredCubePipeline, nullptr);
+    vkDestroyPipeline(m_vulkanContext->device, brdfLUTPipeline, nullptr);
 
     cubemapDescriptors.destroyPools(m_vulkanContext->device);
     vkDestroyDescriptorSetLayout(m_vulkanContext->device, cubemapDescriptorLayout, nullptr);
@@ -280,10 +291,19 @@ void Skybox::createPipelines() {
     pipelineBuilder.setShaders(cubemapVertShader, prefilteredCubeFragShader);
     prefilteredCubePipeline = pipelineBuilder.build(m_vulkanContext->device);
 
+    VkShaderModule brdfLUTVertShader, brdfLUTFragShader;
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/brdf_lut.vert.spv", &brdfLUTVertShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/brdf_lut.frag.spv", &brdfLUTFragShader))
+
+    pipelineBuilder.setShaders(brdfLUTVertShader, brdfLUTFragShader);
+    brdfLUTPipeline = pipelineBuilder.build(m_vulkanContext->device);
+
     vkDestroyShaderModule(m_vulkanContext->device, cubemapVertShader, nullptr);
     vkDestroyShaderModule(m_vulkanContext->device, cubemapFragShader, nullptr);
     vkDestroyShaderModule(m_vulkanContext->device, irradianceMapFragShader, nullptr);
     vkDestroyShaderModule(m_vulkanContext->device, prefilteredCubeFragShader, nullptr);
+    vkDestroyShaderModule(m_vulkanContext->device, brdfLUTVertShader, nullptr);
+    vkDestroyShaderModule(m_vulkanContext->device, brdfLUTFragShader, nullptr);
 }
 
 void Skybox::createOffscreenDrawImage() {
@@ -337,6 +357,7 @@ void Skybox::init() {
     createCubemap();
     createIrradianceMap();
     createPrefilteredCube();
+    createBrdfLUT();
 }
 
 void Skybox::createIrradianceMap() {
@@ -521,5 +542,67 @@ void Skybox::createPrefilteredCube() {
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT,
                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
     });
+}
 
+void Skybox::createBrdfLUT() {
+    VkRenderingAttachmentInfo colorAttachment = VkInit::attachmentInfo(m_offscreenImage.imageView, nullptr);
+    VkRenderingInfo renderInfo = VkInit::renderingInfo(
+            {m_offscreenImage.imageExtent.width, m_offscreenImage.imageExtent.height}, &colorAttachment, nullptr);
+
+    VkViewport viewport = VkInit::viewport(m_offscreenImage.imageExtent.width, m_offscreenImage.imageExtent.height);
+    VkRect2D scissor = {
+            .offset = {0, 0},
+            .extent = {m_offscreenImage.imageExtent.width, m_offscreenImage.imageExtent.height}
+    };
+
+    m_vulkanContext->immediateSubmit([&](VkCommandBuffer cmd) {
+        // draw one face of cube
+        vkCmdBeginRendering(cmd, &renderInfo);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, brdfLUTPipeline);
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        vkCmdBindIndexBuffer(cmd, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, 3, 1, 0, 0, 0);
+        vkCmdEndRendering(cmd);
+
+        // transition drawn image to transfer src to copy to cubemap texture
+        VkUtil::transitionImage(cmd, m_offscreenImage.image,
+                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+
+        VkImageCopy copyRegion = {};
+        copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copyRegion.srcSubresource.baseArrayLayer = 0;
+        copyRegion.srcSubresource.mipLevel = 0;
+        copyRegion.srcSubresource.layerCount = 1;
+        copyRegion.srcOffset = {0, 0, 0};
+
+        copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copyRegion.dstSubresource.baseArrayLayer = 0;
+        copyRegion.dstSubresource.mipLevel = 0;
+        copyRegion.dstSubresource.layerCount = 1;
+        copyRegion.dstOffset = {0, 0, 0};
+
+        copyRegion.extent.width = static_cast<uint32_t>(viewport.width);
+        copyRegion.extent.height = static_cast<uint32_t>(viewport.height);
+        copyRegion.extent.depth = 1;
+
+        vkCmdCopyImage(
+                cmd, m_offscreenImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                brdfLUT.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1, &copyRegion
+        );
+
+        // transition drawn image back to color attachment
+        VkUtil::transitionImage(cmd, m_offscreenImage.image,
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+
+        VkUtil::transitionImage(cmd, brdfLUT.image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_READ_BIT,
+                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT);
+    });
 }
