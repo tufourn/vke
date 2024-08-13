@@ -262,8 +262,8 @@ void Skybox::createPipelines() {
     VK_CHECK(vkCreatePipelineLayout(m_vulkanContext->device, &pipelineCI, nullptr, &cubemapPipelineLayout))
 
     VkShaderModule cubemapVertShader, cubemapFragShader;
-    VK_CHECK(m_vulkanContext->createShaderModule("shaders/cubemap.vert.spv", &cubemapVertShader))
-    VK_CHECK(m_vulkanContext->createShaderModule("shaders/cubemap.frag.spv", &cubemapFragShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/ibl/cubemap.vert.spv", &cubemapVertShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/ibl/cubemap.frag.spv", &cubemapFragShader))
 
     PipelineBuilder pipelineBuilder;
     pipelineBuilder
@@ -280,20 +280,20 @@ void Skybox::createPipelines() {
     cubemapPipeline = pipelineBuilder.build(m_vulkanContext->device);
 
     VkShaderModule irradianceMapFragShader;
-    VK_CHECK(m_vulkanContext->createShaderModule("shaders/irradiance_map.frag.spv", &irradianceMapFragShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/ibl/irradiance_map.frag.spv", &irradianceMapFragShader))
 
     pipelineBuilder.setShaders(cubemapVertShader, irradianceMapFragShader);
     irradianceMapPipeline = pipelineBuilder.build(m_vulkanContext->device);
 
     VkShaderModule prefilteredCubeFragShader;
-    VK_CHECK(m_vulkanContext->createShaderModule("shaders/prefiltered_cube.frag.spv", &prefilteredCubeFragShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/ibl/prefiltered_cube.frag.spv", &prefilteredCubeFragShader))
 
     pipelineBuilder.setShaders(cubemapVertShader, prefilteredCubeFragShader);
     prefilteredCubePipeline = pipelineBuilder.build(m_vulkanContext->device);
 
     VkShaderModule brdfLUTVertShader, brdfLUTFragShader;
-    VK_CHECK(m_vulkanContext->createShaderModule("shaders/brdf_lut.vert.spv", &brdfLUTVertShader))
-    VK_CHECK(m_vulkanContext->createShaderModule("shaders/brdf_lut.frag.spv", &brdfLUTFragShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/ibl/brdf_lut.vert.spv", &brdfLUTVertShader))
+    VK_CHECK(m_vulkanContext->createShaderModule("shaders/ibl/brdf_lut.frag.spv", &brdfLUTFragShader))
 
     pipelineBuilder.setShaders(brdfLUTVertShader, brdfLUTFragShader);
     brdfLUTPipeline = pipelineBuilder.build(m_vulkanContext->device);

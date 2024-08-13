@@ -26,12 +26,8 @@ struct PushConstantsBindless {
 };
 
 struct PushConstantsSkybox {
+    glm::mat4 matrix;
     VkDeviceAddress vertexBuffer;
-};
-
-struct UniformSkybox {
-    glm::mat4 proj;
-    glm::mat4 model;
 };
 
 // holds draw command parameters: offsets for the bounded buffers and instance count
@@ -120,8 +116,6 @@ private:
     std::array<VkDescriptorSet, MAX_CONCURRENT_FRAMES> skyboxDescriptorSets;
     VkPipeline skyboxPipeline;
     VkPipelineLayout skyboxPipelineLayout;
-    VulkanBuffer m_skyboxUniformBuffer;
-    std::array<VulkanBuffer, MAX_CONCURRENT_FRAMES> m_boundedSkyboxUniformBuffer;
 
     DescriptorAllocator globalDescriptors = {};
     VkDescriptorSetLayout globalDescriptorLayout = {};
@@ -180,7 +174,7 @@ private:
 
     void updateLightPos(uint32_t lightIndex);
 
-    void updateRenderObjects();
+    void rotateRenderObjects();
 
     void initSkyboxPipeline();
 

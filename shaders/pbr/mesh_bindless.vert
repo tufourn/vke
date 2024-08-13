@@ -1,0 +1,85 @@
+#version 450
+#extension GL_EXT_buffer_reference : require
+
+layout (location = 0) out vec3 outFragPos;
+layout (location = 1) out vec2 outUV;
+layout (location = 2) out mat3 outTBN;
+
+layout(set = 0, binding = 0) uniform GlobalUniform {
+    mat4 view;
+    mat4 proj;
+    mat4 projView;
+    vec3 cameraPos;
+    uint numLights;
+    float pad[12];
+} globalUniform;
+
+layout(std430, set = 0, binding = 1) readonly buffer TransformBuffer {
+    mat4 transforms[];
+};
+
+layout(std430, set = 0, binding = 3) readonly buffer JointBuffer {
+    mat4 joints[];
+};
+
+layout(std430, set = 0, binding = 4) readonly buffer ModelTransformBuffer {
+    mat4 modelTransforms[];
+};
+
+struct Vertex {
+    vec3 position;
+    float uv_x;
+    vec3 normal;
+    float uv_y;
+    vec4 tangent;
+    vec4 bitangent;
+    vec4 jointIndices;
+    vec4 jointWeights;
+};
+
+layout(buffer_reference, std430) readonly buffer VertexBuffer {
+    Vertex vertices[];
+};
+
+//push constants block
+layout(push_constant) uniform constants
+{
+    VertexBuffer vertexBuffer;
+    uint transformOffset;
+    uint materialOffset;
+    uint jointOffset;
+
+    uint modelTransformOffset;
+    float pad[3];
+} pc;
+
+void main()
+{
+    //load vertex data from device adress
+    Vertex v = pc.vertexBuffer.vertices[gl_VertexIndex];
+    mat4 transform = transforms[pc.transformOffset];
+
+    mat4 modelTransform = modelTransforms[pc.modelTransformOffset + gl_InstanceIndex];
+
+    mat4 skinMatrix =
+    v.jointWeights.x * joints[pc.jointOffset + int(v.jointIndices.x)] +
+    v.jointWeights.y * joints[pc.jointOffset + int(v.jointIndices.y)] +
+    v.jointWeights.z * joints[pc.jointOffset + int(v.jointIndices.z)] +
+    v.jointWeights.w * joints[pc.jointOffset + int(v.jointIndices.w)];
+
+    mat4 model = modelTransform * transform * skinMatrix;
+
+    outFragPos = vec3(model * vec4(v.position, 1.0));
+
+    vec3 T = normalize(mat3(model) * v.tangent.xyz);
+    vec3 B = normalize(mat3(model) * v.bitangent.xyz * v.tangent.w);
+    vec3 N = normalize(mat3(transpose(inverse(model))) * v.normal);
+
+    outTBN = mat3(T, B, N);
+
+    //output data
+    gl_Position = globalUniform.projView * vec4(outFragPos, 1.0);
+
+    outUV.x = v.uv_x;
+    outUV.y = v.uv_y;
+}

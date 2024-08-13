@@ -4,7 +4,7 @@
 A Vulkan renderer. It's primarily a playground for me to learn and try to implement modern graphics programming techniques. 
 
 ### Screenshots
-![helmet](screenshots/helmet.gif)
+![helmet](screenshots/helmet.png)
 
 ## Features
 - [x] Bindless resources
@@ -12,8 +12,7 @@ A Vulkan renderer. It's primarily a playground for me to learn and try to implem
 - [x] Physically-based rendering
 - [x] Animations with vertex skinning
 - [x] Normal mapping, with [MikkTSpace](https://github.com/mmikk/MikkTSpace) tangent calculation
-- [x] Environment cubemap (currently only supports equirectangular images)
-- [x] Image based lighting
+- [x] Image based lighting (currently only support equirectangular images)
 
 ## Todos
 - [ ] Shadow mapping

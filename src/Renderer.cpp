@@ -342,8 +342,8 @@ void Renderer::setupVulkan() {
     VK_CHECK(vkCreatePipelineLayout(m_vulkanContext.device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout))
 
     VkShaderModule triangleVertShader, triangleFragShader;
-    VK_CHECK(m_vulkanContext.createShaderModule("shaders/mesh_bindless.vert.spv", &triangleVertShader))
-    VK_CHECK(m_vulkanContext.createShaderModule("shaders/texture_bindless.frag.spv", &triangleFragShader))
+    VK_CHECK(m_vulkanContext.createShaderModule("shaders/pbr/mesh_bindless.vert.spv", &triangleVertShader))
+    VK_CHECK(m_vulkanContext.createShaderModule("shaders/pbr/texture_bindless.frag.spv", &triangleFragShader))
 
     PipelineBuilder trianglePipelineBuilder;
     trianglePipelineBuilder
@@ -413,7 +413,6 @@ void Renderer::terminateVulkan() {
     m_vulkanContext.destroyBuffer(m_uniformBuffer);
     m_vulkanContext.destroyBuffer(m_transformBuffer);
     m_vulkanContext.destroyBuffer(m_jointBuffer);
-    m_vulkanContext.destroyBuffer(m_skyboxUniformBuffer);
 
     for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
         if (m_boundedUniformBuffers[frame_i].buffer != VK_NULL_HANDLE) {
@@ -430,9 +429,6 @@ void Renderer::terminateVulkan() {
         }
         if (m_boundedModelTransformBuffer[frame_i].buffer != VK_NULL_HANDLE) {
             m_vulkanContext.destroyBuffer(m_boundedModelTransformBuffer[frame_i]);
-        }
-        if (m_boundedSkyboxUniformBuffer[frame_i].buffer != VK_NULL_HANDLE) {
-            m_vulkanContext.destroyBuffer(m_boundedSkyboxUniformBuffer[frame_i]);
         }
     }
 
@@ -453,7 +449,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     }
 
     updateLightPos(0);
-    updateRenderObjects();
+    rotateRenderObjects();
     updateLightBuffer(cmd);
 
     createDrawDatas(cmd);
@@ -472,25 +468,6 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     glm::mat4 view = m_camera.getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(70.f), viewport.width / viewport.height, 0.001f, 1e9f);
     projection[1][1] *= -1; // flip y
-
-    // prepare skybox data
-    UniformSkybox *uniformSkybox = static_cast<UniformSkybox *>(m_skyboxUniformBuffer.info.pMappedData);
-    *uniformSkybox = {projection, glm::mat4(glm::mat3(view))}; // remove translation
-    VkBufferCopy skyboxUniformCopy = {0};
-    skyboxUniformCopy.dstOffset = 0;
-    skyboxUniformCopy.srcOffset = 0;
-    skyboxUniformCopy.size = sizeof(UniformSkybox);
-    vkCmdCopyBuffer(cmd, m_skyboxUniformBuffer.buffer, m_boundedSkyboxUniformBuffer[currentFrame].buffer,
-                    1, &skyboxUniformCopy);
-
-    DescriptorWriter skyboxWriter;
-    skyboxWriter.writeBuffer(0, m_boundedSkyboxUniformBuffer[currentFrame].buffer, sizeof(UniformSkybox), 0,
-                             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    skyboxWriter.writeImage(1, m_skybox->prefilteredCube.imageView, m_skybox->sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0);
-    skyboxWriter.updateSet(m_vulkanContext.device, skyboxDescriptorSets[currentFrame]);
-
-    // end of prepare skybox
 
     m_globalUniformData.view = view;
     m_globalUniformData.proj = projection;
@@ -575,9 +552,16 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
     }
 
     // skybox
+    DescriptorWriter skyboxWriter;
+    skyboxWriter.writeImage(0, m_skybox->prefilteredCube.imageView, m_skybox->sampler,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0);
+    skyboxWriter.updateSet(m_vulkanContext.device, skyboxDescriptorSets[currentFrame]);
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxPipeline);
 
     PushConstantsSkybox pcs = {};
+    pcs.matrix = projection * glm::mat4(glm::mat3(view));
     pcs.vertexBuffer = m_vulkanContext.getBufferAddress(m_skybox->vertexBuffer);
     vkCmdPushConstants(cmd, skyboxPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantsSkybox), &pcs);
     vkCmdBindIndexBuffer(cmd, m_skybox->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -585,7 +569,6 @@ void Renderer::drawGeometry(VkCommandBuffer cmd) {
                             0, 1, &skyboxDescriptorSets[currentFrame], 0, nullptr);
     vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
 
-    // end of skybox
     vkCmdEndRendering(cmd);
 }
 
@@ -1031,7 +1014,7 @@ uint32_t Renderer::addRenderObject(RenderObjectInfo info) {
     return renderObjId;
 }
 
-void Renderer::updateRenderObjects() {
+void Renderer::rotateRenderObjects() {
     for (auto &renderObject: m_renderObjects) {
         renderObject.second.modelMatrix = glm::rotate(renderObject.second.modelMatrix, 0.2f * m_timer.deltaTime(),
                                                       glm::vec3(0.0, 1.0, 0.0));
@@ -1040,14 +1023,12 @@ void Renderer::updateRenderObjects() {
 
 void Renderer::initSkyboxPipeline() {
     DescriptorLayoutBuilder layoutBuilder;
-    layoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    layoutBuilder.addBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     skyboxDescriptorLayout = layoutBuilder.build(m_vulkanContext.device,
                                                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
     std::vector<DescriptorAllocator::PoolSizeRatio> frameSizes = {
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1},
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
     };
 
@@ -1071,8 +1052,8 @@ void Renderer::initSkyboxPipeline() {
     VK_CHECK(vkCreatePipelineLayout(m_vulkanContext.device, &pipelineCI, nullptr, &skyboxPipelineLayout))
 
     VkShaderModule skyboxVertShader, skyboxFragShader;
-    VK_CHECK(m_vulkanContext.createShaderModule("shaders/skybox.vert.spv", &skyboxVertShader))
-    VK_CHECK(m_vulkanContext.createShaderModule("shaders/skybox.frag.spv", &skyboxFragShader))
+    VK_CHECK(m_vulkanContext.createShaderModule("shaders/pbr/skybox.vert.spv", &skyboxVertShader))
+    VK_CHECK(m_vulkanContext.createShaderModule("shaders/pbr/skybox.frag.spv", &skyboxFragShader))
 
     PipelineBuilder pipelineBuilder;
     pipelineBuilder
@@ -1091,17 +1072,4 @@ void Renderer::initSkyboxPipeline() {
 
     vkDestroyShaderModule(m_vulkanContext.device, skyboxVertShader, nullptr);
     vkDestroyShaderModule(m_vulkanContext.device, skyboxFragShader, nullptr);
-
-    m_skyboxUniformBuffer = m_vulkanContext.createBuffer(sizeof(UniformSkybox),
-                                                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                         VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                                                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-
-    for (size_t frame_i = 0; frame_i < MAX_CONCURRENT_FRAMES; frame_i++) {
-        m_boundedSkyboxUniformBuffer[frame_i] = m_vulkanContext.createBuffer(sizeof(UniformSkybox),
-                                                                             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                             VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
-    }
 }
